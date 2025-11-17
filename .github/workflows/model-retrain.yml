@@ -1,0 +1,177 @@
+name: Model Retraining Pipeline
+
+on:
+  schedule:
+    # Ejecutar cada domingo a las 2 AM UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch:  # Permite ejecución manual
+    inputs:
+      force_retrain:
+        description: 'Force retrain even if no new data'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  PYTHON_VERSION: '3.10'
+
+jobs:
+  check-new-data:
+    name: Check for New Data
+    runs-on: ubuntu-latest
+    outputs:
+      has_new_data: ${{ steps.check.outputs.has_new_data }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for new data
+        id: check
+        env:
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+        run: |
+          # Verificar si hay suficientes datos nuevos desde último entrenamiento
+          # Este es un ejemplo simplificado
+          echo "has_new_data=true" >> $GITHUB_OUTPUT
+
+  retrain:
+    name: Retrain Model
+    runs-on: ubuntu-latest
+    needs: [check-new-data]
+    if: needs.check-new-data.outputs.has_new_data == 'true' || github.event.inputs.force_retrain == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Set up database connection
+        env:
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+        run: |
+          echo "Database connection configured"
+
+      - name: Train model
+        env:
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+        run: |
+          python -c "
+          import asyncio
+          from src.services.data import entrenar_ambos_modelos
+          from utils.settings import get_session
+          
+          async def train():
+              session = next(get_session())
+              result = await entrenar_ambos_modelos(session)
+              print(f'Model trained successfully. Metrics: {result.random_forest.metricas_test.f1_score:.4f}')
+          
+          asyncio.run(train())
+          "
+
+      - name: Validate model
+        run: |
+          python -c "
+          from pathlib import Path
+          import json
+          import glob
+          
+          # Encontrar metadata más reciente
+          metadata_files = glob.glob('models/metadata_*.json')
+          if not metadata_files:
+              raise Exception('No metadata file found')
+          
+          latest_metadata = max(metadata_files, key=lambda x: Path(x).stat().st_mtime)
+          metadata = json.load(open(latest_metadata))
+          
+          # Validar métricas mínimas
+          test_metrics = metadata['metrics']['test']
+          assert test_metrics['accuracy'] > 0.85, f'Accuracy too low: {test_metrics[\"accuracy\"]}'
+          assert test_metrics['f1_score'] > 0.80, f'F1-Score too low: {test_metrics[\"f1_score\"]}'
+          assert test_metrics['auc'] > 0.85, f'AUC too low: {test_metrics[\"auc\"]}'
+          
+          print(f'Model validation passed. Accuracy: {test_metrics[\"accuracy\"]:.4f}')
+          "
+
+      - name: Compare with current model
+        id: compare
+        run: |
+          python -c "
+          from pathlib import Path
+          import json
+          import glob
+          
+          # Obtener métricas del nuevo modelo
+          metadata_files = glob.glob('models/metadata_*.json')
+          latest_metadata = max(metadata_files, key=lambda x: Path(x).stat().st_mtime)
+          new_metrics = json.load(open(latest_metadata))['metrics']['test']
+          
+          # Aquí se compararía con el modelo actual en producción
+          # Por ahora, solo validamos que sea mejor que un umbral
+          print(f'New model metrics: Accuracy={new_metrics[\"accuracy\"]:.4f}, F1={new_metrics[\"f1_score\"]:.4f}')
+          "
+
+      - name: Upload model artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: model-artifacts
+          path: |
+            models/*.pkl
+            models/*.json
+          retention-days: 90
+
+      - name: Create release
+        if: success()
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: model-${{ github.run_number }}
+          release_name: Model Version ${{ github.run_number }}
+          body: |
+            New model version trained successfully.
+            
+            **Metrics:**
+            - Accuracy: TBD
+            - F1-Score: TBD
+            - AUC: TBD
+            
+            **Artifacts:**
+            - Model file: modelo_rf_*.pkl
+            - Feature names: feature_names_*.pkl
+            - Metadata: metadata_*.json
+          draft: false
+          prerelease: false
+
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "Model retraining completed successfully"
+          # Aquí se podría enviar notificación a Slack, email, etc.
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "Model retraining failed"
+          # Aquí se podría enviar alerta a Slack, email, etc.
+
