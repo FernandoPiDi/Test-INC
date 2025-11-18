@@ -1,6 +1,6 @@
 # API de Predicción de Adherencia de Pacientes Oncológicos
 
-## 📋 Descripción del Proyecto
+## Descripción del Proyecto
 
 API desarrollada con FastAPI para predecir la adherencia a tratamientos de pacientes oncológicos utilizando Machine Learning. El sistema procesa los datos de consultas médicas y resultados de laboratorio para generar predicciones mediante modelos de XGBoost y Redes Neuronales.
 
@@ -8,7 +8,7 @@ API desarrollada con FastAPI para predecir la adherencia a tratamientos de pacie
 
 ## Instalación y Configuración
 
-### Opción 1: Docker (Recomendado)
+### Docker
 
 #### 1. Crear archivo `.env`
 
@@ -39,40 +39,7 @@ docker-compose up -d --build
 
 La API estará disponible en: <http://localhost:8000>
 
-### Opción 2: Instalación Local
-
-#### 1. Instalar dependencias
-
-```bash
-# Usando uv (recomendado)
-pip install uv
-uv pip install -r pyproject.toml
-
-# O usando pip directamente
-pip install -e .
-```
-
-#### 2. Configurar base de datos
-
-Editar `.env` con las credenciales de PostgreSQL local.
-
-#### 3. Ejecutar migraciones
-
-```bash
-alembic upgrade head
-```
-
-#### 4. Iniciar la API
-
-```bash
-python -m uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
----
-
-## Flujo de Trabajo Completo para la API 
-
-Para resolver la prueba técnica, sigue este flujo **en orden**:
+## Flujo de Trabajo Completo para la API
 
 ### **Cargar Datos Iniciales** (Si la BD está vacía)
 
@@ -82,7 +49,7 @@ curl -X POST "http://localhost:8000/laboratorio/datos" \
      -F "file=@./data/Dataset_prueba.xlsx"
 ```
 
-**Resultado esperado:** ✓ 80 pacientes, 596 consultas, 430 laboratorios
+**Resultado esperado:**  80 pacientes, 596 consultas, 430 laboratorios
 
 ### **Procesar y Limpiar Datos**
 
@@ -91,14 +58,14 @@ curl -X POST "http://localhost:8000/laboratorio/datos" \
 curl -X PUT "http://localhost:8000/laboratorio/procesamiento/limpieza"
 ```
 
-**¿Por qué es crítico?**
+¿Por qué es crítico?
 
 - Imputa ~228 registros con NaN en `resultado_numerico` (53% de los datos)
 - Normaliza variables categóricas
 - Corrige outliers en datos numéricos
-- **Garantiza dataset 100% limpio para ML**
+- Garantiza dataset 100% limpio para ML
 
-**Resultado esperado:** ✓ Reporte con imputaciones realizadas
+Resultado esperado: Reporte con imputaciones realizadas
 
 ### **Generar Dataset para Modelado**
 
@@ -107,7 +74,7 @@ curl -X PUT "http://localhost:8000/laboratorio/procesamiento/limpieza"
 curl -X GET "http://localhost:8000/laboratorio/dataset/modelado"
 ```
 
-**Resultado esperado:** ✓ CSV sin valores vacíos en `./data/dataset_modelado_YYYYMMDD_HHMMSS.csv`
+Resultado esperado: ✓ CSV sin valores vacíos en `./data/dataset_modelado_YYYYMMDD_HHMMSS.csv`
 
 ### **Entrenar Modelos**
 
@@ -149,7 +116,7 @@ curl -X POST "http://localhost:8000/laboratorio/predecir" \
 }'
 ```
 
-**Resultado esperado:**
+Resultado esperado:
 
 ```json
 {
@@ -171,6 +138,14 @@ Este proyecto resuelve los siguientes requerimientos del examen técnico:
 
 ### **Parte 1: Ingeniería de Datos**
 
+La implementación sigue un proceso ETL (Extract, Transform, Load) clásico aplicado a datos médicos:
+
+- **Extract (Extraer)**: `POST /laboratorio/datos` - Subir y cargar archivos Excel con datos crudos
+- **Transform (Transformar)**: `PUT /laboratorio/procesamiento/limpieza` - Limpiar, normalizar y estandarizar datos
+- **Load (Cargar)**: `GET /laboratorio/dataset/modelado` - Generar datasets optimizados listos para análisis y modelos
+
+Este flujo garantiza que los datos médicos sean confiables y estén preparados para generar insights precisos.
+
 #### **a) Bases de datos:**
 
 **Endpoint:** `GET /laboratorio/dataset`
@@ -178,6 +153,28 @@ Este proyecto resuelve los siguientes requerimientos del examen técnico:
 ```bash
 curl -X GET "http://localhost:8000/laboratorio/dataset" \
      -H "accept: application/json"
+```
+
+**Query SQL - Extract (Carga de datos desde Excel):**
+
+```sql
+-- Los datos se cargan desde Excel usando pandas.read_excel()
+-- y se insertan en las tablas usando SQLAlchemy ORM
+
+INSERT INTO paciente (
+    id_paciente, sexo, edad, zona_residencia, fecha_dx,
+    tipo_cancer, estadio, aseguradora, adherencia_12m
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+INSERT INTO consulta (
+    id_consulta, id_paciente, fecha_consulta, motivo,
+    prioridad, especialista
+) VALUES (?, ?, ?, ?, ?, ?);
+
+INSERT INTO laboratorio (
+    id_lab, id_paciente, fecha_muestra, tipo_prueba,
+    resultado, resultado_numerico, unidad
+) VALUES (?, ?, ?, ?, ?, ?, ?);
 ```
 
 **Descripción:** Retorna un dataset consolidado que incluye:
@@ -205,14 +202,14 @@ curl -X PUT "http://localhost:8000/laboratorio/procesamiento/limpieza" \
 - Normalización de texto (minúsculas, eliminación de tildes)
 - Estandarización de valores categóricos
 - Corrección de outliers en resultados numéricos mediante Winsorización (IQR)
-- **Imputación inteligente de valores faltantes:**
+- Imputación inteligente de valores faltantes:
   - Columnas con < 5% faltantes: Valores por defecto o mediana/moda
   - Columnas con 5-20% faltantes: Mediana (numéricos) o moda (categóricos)
   - Columnas con > 20% faltantes: Imputación con 0 para columnas numéricas
 - Validación de tipos de datos
-- **Garantía de datos sin NaN** - Los valores nulos se imputan directamente en la base de datos
+- Garantía de datos sin NaN - Los valores nulos se imputan directamente en la base de datos
 
-**Respuesta:** Reporte detallado con:
+Respuesta: Reporte detallado con:
 
 - Total de registros procesados por tabla
 - Cambios realizados (normalizaciones, imputaciones, correcciones)
@@ -221,6 +218,15 @@ curl -X PUT "http://localhost:8000/laboratorio/procesamiento/limpieza" \
 - Tiempo de procesamiento
 
 **Importante:** Este endpoint debe ejecutarse **antes** de generar el dataset de modelado para garantizar que los datos estén completamente limpios.
+
+**Query SQL - Transform (Carga de datos para limpieza):**
+
+```sql
+-- Datos se cargan desde BD a pandas para procesamiento
+SELECT * FROM paciente;
+SELECT * FROM consulta;
+SELECT * FROM laboratorio;
+```
 
 ---
 
@@ -245,7 +251,59 @@ curl -X GET "http://localhost:8000/laboratorio/dataset/modelado" \
 
 1. Cargar datos desde Excel: `POST /laboratorio/datos`
 2. Ejecutar limpieza: `PUT /laboratorio/procesamiento/limpieza`
-3. Generar dataset: `GET /laboratorio/dataset/modelado` ← Este endpoint
+3. Generar dataset: `GET /laboratorio/dataset/modelado`
+
+**Query SQL - Load (Generación del dataset final):**
+
+```sql
+WITH paciente_consultas AS (
+    SELECT
+        p.id_paciente,
+        COUNT(c.id_consulta) as count_consultas
+    FROM paciente p
+    LEFT JOIN consulta c ON p.id_paciente = c.id_paciente
+    GROUP BY p.id_paciente
+),
+paciente_labs AS (
+    SELECT
+        p.id_paciente,
+        COUNT(l.id_lab) as count_laboratorios,
+        COALESCE(AVG(l.resultado_numerico), 0) as avg_resultado_numerico,
+        COALESCE(AVG(CASE WHEN LOWER(l.tipo_prueba) LIKE '%biopsia%' THEN l.resultado_numerico END), 0) as avg_biopsia,
+        COALESCE(AVG(CASE WHEN LOWER(l.tipo_prueba) LIKE '%vph%' THEN l.resultado_numerico END), 0) as avg_vph,
+        COALESCE(AVG(CASE WHEN LOWER(l.tipo_prueba) LIKE '%ca125%' OR LOWER(l.tipo_prueba) LIKE '%marcador%' THEN l.resultado_numerico END), 0) as avg_marcador_ca125,
+        COALESCE(AVG(CASE WHEN LOWER(l.tipo_prueba) LIKE '%psa%' THEN l.resultado_numerico END), 0) as avg_psa,
+        COALESCE(AVG(CASE WHEN LOWER(l.tipo_prueba) LIKE '%colonoscopia%' THEN l.resultado_numerico END), 0) as avg_colonoscopia
+    FROM paciente p
+    LEFT JOIN laboratorio l ON p.id_paciente = l.id_paciente
+    GROUP BY p.id_paciente
+)
+SELECT
+    p.sexo,
+    p.edad,
+    COALESCE(p.zona_residencia, 'Desconocida') as zona_residencia,
+    p.tipo_cancer,
+    p.estadio,
+    p.aseguradora,
+    COALESCE(pc.count_consultas, 0) as count_consultas,
+    CURRENT_DATE - p.fecha_dx as dias_desde_diagnostico,
+    COALESCE(pl.count_laboratorios, 0) as count_laboratorios,
+    COALESCE(pl.avg_resultado_numerico, 0) as avg_resultado_numerico,
+    COALESCE(pl.avg_biopsia, 0) as avg_biopsia,
+    COALESCE(pl.avg_vph, 0) as avg_vph,
+    COALESCE(pl.avg_marcador_ca125, 0) as avg_marcador_ca125,
+    COALESCE(pl.avg_psa, 0) as avg_psa,
+    COALESCE(pl.avg_colonoscopia, 0) as avg_colonoscopia,
+    CASE WHEN p.adherencia_12m THEN 1 ELSE 0 END as adherencia_12m
+FROM paciente p
+LEFT JOIN paciente_consultas pc ON p.id_paciente = pc.id_paciente
+LEFT JOIN paciente_labs pl ON p.id_paciente = pl.id_paciente
+WHERE p.sexo IS NOT NULL
+  AND p.tipo_cancer IS NOT NULL
+  AND p.estadio IS NOT NULL
+  AND p.aseguradora IS NOT NULL
+ORDER BY p.id_paciente;
+```
 
 **Respuesta:**
 
@@ -383,19 +441,27 @@ Las métricas de **accuracy, precision, recall, F1-Score y AUC** se calculan aut
 
 #### **d) Comparación de Modelos**
 
-**Resultados del entrenamiento (80 registros, datos limpios):**
+**Resultados del entrenamiento (80 registros: 64 train, 16 test, datos limpios):**
 
 | Métrica | XGBoost | Neural Network |
 |---------|---------|----------------|
-| Accuracy Test | **81.25%** | 68.75% |
-| F1-Score Test | **0.88** | 0.78 |
-| AUC Test | **0.60** | 0.58 |
-| Tiempo Entrenamiento | ~0.2s | ~8s |
+| **Accuracy** | **81.25%** | 68.75% |
+| **Precision** | **0.7857** | 0.75 |
+| **Recall** | **1.0** | 0.8182 |
+| **F1-Score** | **0.88** | 0.7826 |
+| **AUC-ROC** | **0.6** | 0.6545 |
+| Tiempo Entrenamiento | **0.12s** | 2.6s |
 | Inference Time | **~5ms** | ~15ms |
 
 **¿Cuál funciona mejor?**
 
-**XGBoost** supera a la red neuronal en todas las métricas. Con 81.25% de accuracy vs 68.75%, XGBoost demuestra mejor capacidad para aprender patrones con datasets pequeños (< 1000 registros). Los modelos basados en árboles de decisión son más robustos con datos limitados, mientras que las redes neuronales requieren mayor cantidad de ejemplos para generalizar correctamente.
+**XGBoost** este modelo destaca en recall perfecto (100%) y un accuracy sobre 80%, identificando correctamente todos los pacientes con riesgo de abandono. Sin embargo, su precision moderada (78.57%) genera algunos falsos positivos. La red neuronal muestra mejor AUC (0.6545 vs 0.6), sugiriendo mayor capacidad discriminativa, pero sacrifica accuracy (68.75% vs 81.25%).
+
+**Limitaciones detectadas:**
+
+- **Métrica faltante crítica:** No se calculó **Balanced Accuracy**, esencial para datasets desbalanceados como este (adherencia médica).
+- **Dataset pequeño:** Solo 80 registros limitan la capacidad de generalización de ambos modelos.
+- **AUC moderado:** XGBoost (0.6) vs Red Neuronal (0.6545) sugieren necesidad de más features clínicas.
 
 **Impacto de la limpieza de datos:**
 
@@ -404,15 +470,29 @@ Las métricas de **accuracy, precision, recall, F1-Score y AUC** se calculan aut
 
 **¿Cuál es más fácil de desplegar?**
 
-**XGBoost** es significativamente más sencillo:
+**XGBoost** es la opción clara para producción médica:
 
-- **Artifact único:** 1 archivo `.pkl` (~100KB) vs modelo `.keras` + scaler `.pkl`
-- **Dependencias ligeras:** scikit-learn (~50MB) vs TensorFlow (~500MB)
-- **Velocidad:** 3x más rápido en inferencia (5ms vs 15ms)
+- **Simplicidad:** 1 archivo `.pkl` (~100KB) vs modelo `.keras` + scaler `.pkl`
+- **Rendimiento:** 3x más rápido en inferencia crítica (5ms vs 15ms)
 - **Recursos:** ~50MB RAM vs ~200MB RAM
-- **Compatibilidad:** Cualquier servidor Python, sin necesidad de GPU
+- **Fiabilidad:** Sin dependencias complejas de GPU/TPU
 
-**Recomendación:** Para este caso de uso con datos limitados y requisitos de producción, **XGBoost es la mejor opción** tanto en rendimiento (81% accuracy) como en facilidad de deployment. La red neuronal solo se justificaría con >1000 registros de entrenamiento.
+**Arquitecturas utilizadas:**
+
+**XGBoost (HistGradientBoostingClassifier):**
+
+- **Algoritmo:** Histogram-based gradient boosting
+- **Parámetros:** max_iter=100, max_depth=6, learning_rate=0.1
+- **Features:** 11 (edad, consultas, laboratorios, promedios marcadores, zona_residencia_encoded, tipo_cancer_encoded)
+
+**Red Neuronal (TensorFlow Sequential):**
+
+- **Arquitectura:** 64 → 32 → 16 neuronas con Dropout (0.3, 0.2)
+- **Optimizador:** Adam (lr=0.001)
+- **Entrenamiento:** 50 epochs, batch_size=32
+- **Features:** 11 (mismas que XGBoost)
+
+**Recomendación:** **XGBoost** es la opción recomendada para producción médica inmediata. Su recall perfecto (100%) asegura que ningún paciente con riesgo de abandono pase desapercibido, compensando su menor precisión. La velocidad de entrenamiento (0.12s vs 2.6s) lo hace ideal para re-entrenamiento frecuente con nuevos datos médicos.
 
 ---
 
@@ -566,6 +646,12 @@ ENTRYPOINT ["/app/entrypoint.sh"]
 **Deploy**: Actualización automática de contenedores en staging/production
 **Versionado semántico**: Tags v1.2.3 para releases estables
 
+**Kubeflow para MLOps avanzado:**
+**Plataforma ideal** para este caso médico por su integración nativa con Kubernetes
+**Pipelines automatizados** para re-entrenamiento médico con datos sensibles
+**Experiment tracking** y model versioning nativos para compliance regulatorio
+**Multi-tenancy** perfecta para equipos clínicos y de desarrollo separados
+
 ---
 
 ### **Parte 5: Visualización y analítica**
@@ -642,8 +728,6 @@ La API incluye endpoints para generar dashboards comprehensivos que permiten vis
 
 ### **Sistema de analítica para identificar patrones de uso de servicios entre pacientes oncológicos**
 
-El INC requiere un sistema avanzado de analítica para identificar patrones de uso de servicios oncológicos. A continuación se detalla la arquitectura propuesta:
-
 **i. ¿Qué datos usaría?**
 
 Usaría los tres datasets proporcionados:
@@ -686,7 +770,6 @@ Un **Dashboard Interactivo** (ej. en Power BI o Tableau) que permita a la direcc
 Una vez iniciada la API, accede a:
 
 - **Swagger UI**: <http://localhost:8000/docs>
-- **ReDoc**: <http://localhost:8000/redoc>
 - **Health Check**: <http://localhost:8000/health>
 
 ---
