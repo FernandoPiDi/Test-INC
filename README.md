@@ -6,7 +6,7 @@ API desarrollada con FastAPI para predecir la adherencia a tratamientos de pacie
 
 ---
 
-## 🚀 Instalación y Configuración
+## Instalación y Configuración
 
 ### Opción 1: Docker (Recomendado)
 
@@ -32,10 +32,10 @@ docker-compose up -d --build
 
 **¿Qué hace Docker Compose?**
 
-1. ✅ Inicia PostgreSQL con la base de datos
-2. ✅ Espera a que PostgreSQL esté listo (health check)
-3. ✅ Ejecuta migraciones de Alembic automáticamente
-4. ✅ Inicia la API en el puerto 8000
+1. Inicia PostgreSQL con la base de datos
+2. Espera a que PostgreSQL esté listo (health check)
+3. Ejecuta migraciones de Alembic automáticamente
+4. Inicia la API en el puerto 8000
 
 La API estará disponible en: <http://localhost:8000>
 
@@ -70,7 +70,7 @@ python -m uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 
 ---
 
-## Flujo de Trabajo Completo
+## Flujo de Trabajo Completo para la API 
 
 Para resolver la prueba técnica, sigue este flujo **en orden**:
 
@@ -378,6 +378,7 @@ curl -X POST "http://localhost:8000/laboratorio/predecir" \
 #### **c) Evaluación con métricas técnicas**
 
 Las métricas de **accuracy, precision, recall, F1-Score y AUC** se calculan automáticamente durante el entrenamiento y se retornan en la respuesta del endpoint `POST /laboratorio/modelado/entrenar`. Cada modelo incluye métricas tanto para el conjunto de entrenamiento (`metricas_train`) como para el conjunto de test (`metricas_test`).
+
 ---
 
 #### **d) Comparación de Modelos**
