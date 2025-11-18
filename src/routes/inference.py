@@ -1,105 +1,82 @@
 """
-Inference routes for model predictions
+Rutas para inferencia y entrenamiento de modelos de Machine Learning
+
+Este módulo contiene los endpoints para:
+- Predicción de adherencia de pacientes
+- Entrenamiento de modelos
 """
+
 import uuid
-from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 
-from services.inference import get_model_loader
+from app_types.data import ResultadoEntrenamiento
+from app_types.inference import (
+    PredictionRequest,
+    PredictionResponse,
+    TrainingRequest,
+)
+from services.inference import predecir_con_modelo
 from services.monitoring import get_monitoring_service
-from types.inference import PredictionRequest, PredictionResponse, ModelInfo
-from types.monitoring import ModelMetrics, PredictionLog
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/api/v1", tags=["inference"])
+router = APIRouter(prefix="/laboratorio", tags=["inferencia"])
 
 
-@router.post("/predict", response_model=PredictionResponse)
-async def predict(request: PredictionRequest) -> PredictionResponse:
+@router.post("/predecir", response_model=PredictionResponse)
+async def predecir(request: PredictionRequest) -> PredictionResponse:
     """
-    Endpoint para realizar predicciones de adherencia de pacientes
+    Predecir adherencia de paciente
 
-    Recibe los datos del paciente y retorna la predicción de adherencia a 12 meses
-    junto con la probabilidad y metadatos del modelo.
+    Realiza predicción de adherencia a 12 meses usando el modelo especificado.
+    Recibe tipo de modelo (xgboost o neural_network), datos demográficos,
+    clínicos y agregados del paciente.
 
-    ### Parámetros de entrada:
-    - **Demográficos**: sexo, edad, zona_residencia
-    - **Clínicos**: tipo_cancer, estadio, aseguradora
-    - **Agregados**: count_consultas, count_laboratorios, promedios de pruebas
+    Tipos de modelo disponibles:
+    - "xgboost": Gradient Boosting (HistGradientBoostingClassifier)
+    - "neural_network": Red Neuronal con TensorFlow
 
-    ### Respuesta:
-    - **prediction**: 0 (No adherente) o 1 (Adherente)
-    - **probability**: Probabilidad de adherencia (0.0 a 1.0)
-    - **model_version**: Versión del modelo utilizado
-    - **inference_time_ms**: Tiempo de inferencia en milisegundos
-
-    ### Ejemplo de uso:
-    ```json
-    {
-      "sexo": "Femenino",
-      "edad": 55,
-      "zona_residencia": "Urbana",
-      "tipo_cancer": "Mama",
-      "estadio": "Ii",
-      "aseguradora": "Sura",
-      "count_consultas": 12,
-      "dias_desde_diagnostico": 365,
-      "count_laboratorios": 8,
-      "avg_resultado_numerico": 2.5,
-      "avg_biopsia": 0.0,
-      "avg_vpH": 0.0,
-      "avg_marcador_ca125": 45.3,
-      "avg_psa": 0.0,
-      "avg_colonoscopia": 0.0
-    }
-    ```
+    Retorna la predicción (0 o 1), probabilidad y metadatos del modelo.
     """
     request_id = str(uuid.uuid4())
-    model_loader = get_model_loader()
-    monitoring = get_monitoring_service()
+    monitoreo = get_monitoring_service()
 
     try:
-        # Check if model is loaded
-        if not model_loader.is_loaded():
-            raise HTTPException(
-                status_code=503,
-                detail="Model not loaded. Please train a model first or check model files.",
-            )
+        # Realizar predicción con el modelo especificado
+        respuesta = predecir_con_modelo(request)
 
-        # Make prediction
-        response = model_loader.predict(request)
-
-        # Log successful prediction
-        monitoring.log_prediction(
+        # Registrar predicción exitosa
+        monitoreo.log_prediction(
             request_id=request_id,
-            model_version=response.model_version,
-            prediction=response.prediction,
-            probability=response.probability,
-            inference_time_ms=response.inference_time_ms,
+            model_version=respuesta.model_version,
+            prediction=respuesta.prediction,
+            probability=respuesta.probability,
+            inference_time_ms=respuesta.inference_time_ms,
             success=True,
             input_features=request.model_dump(),
         )
 
         logger.info(
-            f"Prediction successful. Request ID: {request_id}, "
-            f"Prediction: {response.prediction}, Probability: {response.probability:.4f}"
+            f"Predicción exitosa con {request.tipo_modelo.value}. "
+            f"Request ID: {request_id}, "
+            f"Predicción: {respuesta.prediction}, "
+            f"Probabilidad: {respuesta.probability:.4f}"
         )
 
-        return response
+        return respuesta
 
+    except FileNotFoundError as e:
+        logger.error(f"Modelo no encontrado: {str(e)}")
+        raise HTTPException(status_code=404, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
-        # Log failed prediction
-        model_info = model_loader.get_model_info()
-        model_version = model_info.model_version if model_info else "unknown"
-
-        monitoring.log_prediction(
+        # Registrar predicción fallida
+        monitoreo.log_prediction(
             request_id=request_id,
-            model_version=model_version,
+            model_version=f"{request.tipo_modelo.value}_fallida",
             prediction=-1,
             probability=0.0,
             inference_time_ms=0.0,
@@ -108,97 +85,56 @@ async def predict(request: PredictionRequest) -> PredictionResponse:
             error_message=str(e),
         )
 
-        logger.error(f"Prediction failed. Request ID: {request_id}, Error: {str(e)}")
+        logger.error(
+            f"Predicción fallida con {request.tipo_modelo.value}. "
+            f"Request ID: {request_id}, Error: {str(e)}"
+        )
 
         raise HTTPException(
             status_code=500,
-            detail=f"Error during prediction: {str(e)}",
+            detail=f"Error durante la predicción: {str(e)}",
         )
 
 
-@router.get("/model/info", response_model=ModelInfo)
-async def get_model_info() -> ModelInfo:
+@router.post("/modelado/entrenar", response_model=ResultadoEntrenamiento)
+async def entrenar_modelo(
+    request: TrainingRequest,
+) -> ResultadoEntrenamiento:
     """
-    Obtener información sobre el modelo cargado actualmente
+    Entrenar modelo de predicción de adherencia
 
-    Retorna detalles del modelo incluyendo versión, features, y fecha de carga.
+    Entrena un modelo usando el dataset más reciente de ./data/dataset_modelado_*.csv
+    generado por GET /laboratorio/dataset/modelado.
+
+    Tipos de modelo disponibles:
+    - "xgboost": Gradient Boosting (HistGradientBoostingClassifier)
+    - "neural_network": Red Neuronal con TensorFlow
+
+    El proceso incluye: carga del CSV, codificación de categóricas, split 80/20,
+    entrenamiento y evaluación con métricas estándar (Accuracy, Precision, Recall, F1, AUC).
+
+    El modelo entrenado se guarda automáticamente en ./models con timestamp.
+    Requiere que exista al menos un archivo dataset en ./data.
     """
-    model_loader = get_model_loader()
-
-    if not model_loader.is_loaded():
-        raise HTTPException(
-            status_code=404,
-            detail="No model loaded. Please train a model first.",
-        )
-
-    model_info = model_loader.get_model_info()
-    if not model_info:
-        raise HTTPException(
-            status_code=500,
-            detail="Model info not available.",
-        )
-
-    return model_info
-
-
-@router.get("/model/metrics", response_model=ModelMetrics)
-async def get_model_metrics(
-    model_version: str | None = None, hours: int = 24
-) -> ModelMetrics:
-    """
-    Obtener métricas de desempeño del modelo
-
-    ### Parámetros:
-    - **model_version**: Versión específica del modelo (opcional)
-    - **hours**: Período de tiempo en horas para calcular métricas (default: 24)
-
-    ### Métricas retornadas:
-    - Total de predicciones
-    - Distribución de predicciones (clase 0 vs clase 1)
-    - Tiempos de inferencia (promedio, P95, P99)
-    - Tasa de éxito
-    - Conteo de errores
-    """
-    monitoring = get_monitoring_service()
-    return monitoring.get_metrics(model_version=model_version, hours=hours)
-
-
-@router.get("/model/predictions", response_model=list[PredictionLog])
-async def get_recent_predictions(
-    limit: int = 100, model_version: str | None = None
-) -> list[PredictionLog]:
-    """
-    Obtener predicciones recientes
-
-    ### Parámetros:
-    - **limit**: Número máximo de predicciones a retornar (default: 100)
-    - **model_version**: Filtrar por versión específica del modelo (opcional)
-    """
-    monitoring = get_monitoring_service()
-    return monitoring.get_recent_predictions(limit=limit, model_version=model_version)
-
-
-@router.post("/model/reload")
-async def reload_model() -> dict:
-    """
-    Recargar el modelo más reciente desde el directorio de modelos
-
-    Útil después de entrenar un nuevo modelo o actualizar versiones.
-    """
-    from services.inference import reload_model
+    from services.inference import entrenar_modelo_especifico
 
     try:
-        reload_model()
-        logger.info("Model reloaded successfully via API")
-        return {
-            "status": "success",
-            "message": "Model reloaded successfully",
-            "timestamp": datetime.now().isoformat(),
-        }
+        logger.info(f"Iniciando entrenamiento de modelo: {request.tipo_modelo}")
+        resultado = await entrenar_modelo_especifico(request.tipo_modelo)
+        logger.info(
+            f"Entrenamiento completado exitosamente. Modelo: {resultado.modelo}, "
+            f"F1-Score: {resultado.metricas_test.f1_score:.4f}"
+        )
+        return resultado
+    except FileNotFoundError as e:
+        logger.error(f"Dataset no encontrado: {str(e)}")
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        logger.error(f"Error de validación en entrenamiento: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error reloading model: {str(e)}")
+        logger.error(f"Error durante el entrenamiento: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Error reloading model: {str(e)}",
+            detail=f"Error durante el entrenamiento: {str(e)}",
         )
-

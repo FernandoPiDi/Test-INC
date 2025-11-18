@@ -1,12 +1,15 @@
 """
-Logging configuration for the application
+Configuración del sistema de logging de la aplicación
+
+Gestiona el logging a consola y archivo con formato estandarizado.
 """
+
 import logging
 import sys
 from pathlib import Path
 from typing import Optional
 
-# Create logs directory
+# Crear directorio de logs
 LOGS_DIR = Path("logs")
 LOGS_DIR.mkdir(exist_ok=True)
 
@@ -17,12 +20,12 @@ def setup_logging(
     format_string: Optional[str] = None,
 ) -> None:
     """
-    Configure application-wide logging
+    Configurar sistema de logging para toda la aplicación
 
     Args:
-        log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        log_file: Optional file path for file logging
-        format_string: Optional custom format string
+        log_level: Nivel de logging (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        log_file: Ruta opcional para logging a archivo
+        format_string: Formato opcional personalizado
     """
     if format_string is None:
         format_string = (
@@ -30,23 +33,23 @@ def setup_logging(
             "[%(filename)s:%(lineno)d] - %(message)s"
         )
 
-    # Create formatter
+    # Crear formateador
     formatter = logging.Formatter(format_string)
 
-    # Root logger
+    # Logger raíz
     root_logger = logging.getLogger()
     root_logger.setLevel(getattr(logging, log_level.upper()))
 
-    # Remove existing handlers
+    # Eliminar handlers existentes
     root_logger.handlers.clear()
 
-    # Console handler
+    # Handler para consola
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
 
-    # File handler (if specified)
+    # Handler para archivo (si se especifica)
     if log_file:
         file_path = LOGS_DIR / log_file
         file_handler = logging.FileHandler(file_path)
@@ -54,7 +57,7 @@ def setup_logging(
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
 
-    # Also log to a general application log
+    # También registrar en log general de la aplicación
     app_log_file = LOGS_DIR / "app.log"
     app_file_handler = logging.FileHandler(app_log_file)
     app_file_handler.setLevel(logging.DEBUG)
@@ -64,17 +67,16 @@ def setup_logging(
 
 def get_logger(name: str) -> logging.Logger:
     """
-    Get a logger instance for a module
+    Obtener instancia de logger para un módulo
 
     Args:
-        name: Logger name (typically __name__)
+        name: Nombre del logger (típicamente __name__)
 
     Returns:
-        Logger instance
+        Instancia de logger configurada
     """
     return logging.getLogger(name)
 
 
-# Initialize logging on import
+# Inicializar logging al importar
 setup_logging()
-

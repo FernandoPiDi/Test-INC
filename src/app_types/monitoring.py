@@ -1,27 +1,11 @@
 """
 Pydantic types for monitoring and logging
 """
+
 from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field
-
-
-class ModelMetrics(BaseModel):
-    """
-    Metrics for model performance monitoring
-    """
-
-    timestamp: datetime
-    model_version: str
-    total_predictions: int
-    predictions_class_0: int
-    predictions_class_1: int
-    avg_inference_time_ms: float
-    p95_inference_time_ms: float
-    p99_inference_time_ms: float
-    error_count: int
-    success_rate: float
 
 
 class PredictionLog(BaseModel):
@@ -59,11 +43,12 @@ class HealthStatus(BaseModel):
     Health check response
     """
 
-    status: str = Field(..., description="Status: 'healthy', 'degraded', or 'unhealthy'")
+    status: str = Field(
+        ..., description="Status: 'healthy', 'degraded', or 'unhealthy'"
+    )
     model_loaded: bool
     model_version: Optional[str] = None
     database_connected: bool
     timestamp: datetime
     uptime_seconds: float
     version: str
-

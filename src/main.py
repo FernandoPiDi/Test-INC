@@ -1,33 +1,26 @@
 """
-API de Inferencia para Predicción de Adherencia de Pacientes
-Despliegue del modelo Random Forest usando FastAPI
-
-Endpoints principales:
-- POST /api/v1/predict: Predicción de adherencia
-- POST /laboratorio/datos: Sube datos desde archivo Excel
-- POST /laboratorio/modelado/entrenar: Entrena modelos
-- GET /health: Health check
+API de Predicción de Adherencia de Pacientes
+FastAPI application con dos routers principales: datos e inferencia
 """
 
 import time
 from datetime import datetime
-from types.monitoring import HealthStatus
 
 import uvicorn
 from fastapi import FastAPI
 from sqlmodel import Session, text
 
-from routes.inference import router as inference_router
-from routes.main import router as laboratorio_router
+from app_types.monitoring import HealthStatus
+from routes import data_router, inference_router
 from services.inference import get_model_loader
 from utils.logging_config import get_logger, setup_logging
 from utils.settings import engine
 
-# Setup logging
+# Configurar sistema de logging
 setup_logging()
 logger = get_logger(__name__)
 
-# Track startup time
+# Registrar tiempo de inicio para cálculo de uptime
 startup_time = time.time()
 
 # ============================================================================
@@ -40,30 +33,30 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Include routers
-app.include_router(laboratorio_router)
+# Incluir routers
+app.include_router(data_router)
 app.include_router(inference_router)
 
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize services on startup"""
-    logger.info("Starting up API...")
-    # Pre-load model
+    """Inicializar servicios al arrancar la aplicación"""
+    logger.info("Iniciando API...")
+    # Precargar modelo
     try:
         model_loader = get_model_loader()
         if model_loader.is_loaded():
-            logger.info("Model loaded successfully on startup")
+            logger.info("Modelo cargado exitosamente en el arranque")
         else:
-            logger.warning("No model loaded on startup")
+            logger.warning("No se cargó ningún modelo en el arranque")
     except Exception as e:
-        logger.error(f"Error loading model on startup: {e}")
+        logger.error(f"Error cargando modelo en el arranque: {e}")
 
 
 @app.get("/health", response_model=HealthStatus)
 async def health_check() -> HealthStatus:
     """
-    Health check endpoint
+    Endpoint de verificación de salud del sistema
 
     Verifica el estado de la API, modelo y base de datos.
     """
@@ -72,16 +65,16 @@ async def health_check() -> HealthStatus:
     model_info = model_loader.get_model_info()
     model_version = model_info.model_version if model_info else None
 
-    # Check database connection
+    # Verificar conexión a base de datos
     db_connected = False
     try:
         with Session(engine) as session:
             session.execute(text("SELECT 1"))
             db_connected = True
     except Exception as e:
-        logger.error(f"Database connection check failed: {e}")
+        logger.error(f"Falló verificación de conexión a base de datos: {e}")
 
-    # Determine overall status
+    # Determinar estado general del sistema
     if model_loaded and db_connected:
         status = "healthy"
     elif model_loaded or db_connected:

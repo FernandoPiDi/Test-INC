@@ -1,0 +1,9 @@
+# Ignorar todos los modelos entrenados
+*.pkl
+*.keras
+*.h5
+*.joblib
+
+# Excepto este archivo
+!.gitignore
+

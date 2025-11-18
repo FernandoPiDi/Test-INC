@@ -1,208 +1,64 @@
 from datetime import date as date_type
 from datetime import datetime
+from pathlib import Path
 from typing import Any, BinaryIO, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel
+from sklearn.pipeline import Pipeline
 from sqlmodel import Session, text
 
+from app_types.data import (
+    AnalisisValoresFaltantes,
+    DashboardTipoCancer,
+    DatasetModelado,
+    NormalizacionCampo,
+    OutliersDetectados,
+    PacienteActividadReciente,
+    PacienteLabAnalysis,
+    ReporteProcesamiento,
+    RutaDataset,
+)
 from models.tables import Consulta, Laboratorio, Paciente
 from utils.logging_config import get_logger
 
+logger = get_logger(__name__)
 
-class PacienteLabAnalysis(BaseModel):
+
+def crear_carpeta_modelos() -> Path:
     """
-    Pydantic model for patient lab analysis response
+    Crear carpeta de modelos
+
+    Crea la carpeta ./models en la raíz del workspace si no existe
+
+    Returns:
+        Ruta a la carpeta de modelos
     """
-
-    id_paciente: str
-    sexo: str
-    edad: int
-    zona_residencia: Optional[str]
-    fecha_dx: date_type
-    tipo_cancer: str
-    estadio: str
-    aseguradora: str
-    adherencia_12m: bool
-    primera_fecha_lab: Optional[date_type]
-    dias_entre_lab_y_dx: Optional[int]
-    mensaje_consistencia: Optional[str] = None
+    # Obtener raíz del workspace (2 niveles arriba de services)
+    workspace_root = Path(__file__).parent.parent.parent
+    carpeta_modelos = workspace_root / "models"
+    carpeta_modelos.mkdir(exist_ok=True)
+    return carpeta_modelos
 
 
-class PacienteActividadReciente(BaseModel):
+def generar_nombre_modelo(nombre_modelo: str, extension: str) -> str:
     """
-    Pydantic model for patient recent activity response
+    Generar nombre de archivo para modelo con timestamp
+
+    Args:
+        nombre_modelo: Nombre base del modelo (ej: "xgboost", "neural_network")
+        extension: Extensión del archivo (ej: "pkl", "keras")
+
+    Returns:
+        Nombre del archivo con formato modelname_timestamp.extension
     """
-
-    id_paciente: str
-    sexo: str
-    edad: int
-    zona_residencia: Optional[str]
-    fecha_dx: date_type
-    tipo_cancer: str
-    estadio: str
-    aseguradora: str
-    adherencia_12m: bool
-    ultima_consulta: Optional[date_type]
-    dias_sin_consulta: Optional[int]
-    total_consultas: int
-    estado_actividad: str
-
-
-class DashboardTipoCancer(BaseModel):
-    """
-    Pydantic model for cancer type dashboard response
-    """
-
-    tipo_cancer: str
-    total_pacientes: int
-    promedio_edad: float
-    consultas_ultimos_6_meses: int
-    total_laboratorios: int
-
-
-class NormalizacionCampo(BaseModel):
-    """
-    Pydantic model for field normalization report
-    """
-
-    campo: str
-    registros_modificados: int
-    valores_unicos_antes: int
-    valores_unicos_despues: int
-    ejemplos_cambios: Dict[str, str]
-
-
-class AnalisisValoresFaltantes(BaseModel):
-    """
-    Pydantic model for missing values analysis
-    """
-
-    campo: str
-    total_registros: int
-    valores_faltantes: int
-    porcentaje_faltante: float
-    recomendacion: str
-
-
-class OutliersDetectados(BaseModel):
-    """
-    Pydantic model for outliers detection report
-    """
-
-    campo: str
-    total_registros: int
-    q1: float
-    q3: float
-    iqr: float
-    limite_inferior: float
-    limite_superior: float
-    outliers_detectados: int
-    porcentaje_outliers: float
-    valores_outliers: List[float]
-
-
-class ReporteProcesamiento(BaseModel):
-    """
-    Pydantic model for complete data processing report
-    """
-
-    normalizaciones: List[NormalizacionCampo]
-    valores_faltantes: List[AnalisisValoresFaltantes]
-    outliers: List[OutliersDetectados]
-    resumen: Dict[str, Any]
-
-
-class DatasetModelado(BaseModel):
-    """
-    Pydantic model for modeling-ready dataset record (one row per patient)
-    """
-
-    # Demographic variables
-    sexo: str
-    edad: int
-    zona_residencia: str
-
-    # Clinical variables
-    tipo_cancer: str
-    estadio: str
-    aseguradora: str
-
-    # Aggregated features - consultations
-    count_consultas: int
-    dias_desde_diagnostico: int
-
-    # Aggregated features - lab tests
-    count_laboratorios: int
-    avg_resultado_numerico: float
-
-    # Lab test averages by type (most common types)
-    avg_biopsia: float
-    avg_vpH: float
-    avg_marcador_ca125: float
-    avg_psa: float
-    avg_colonoscopia: float
-
-    # Target variable
-    adherencia_12m: int
-
-
-class MetricasModelo(BaseModel):
-    """
-    Pydantic model for model evaluation metrics
-    """
-
-    accuracy: float
-    precision: float
-    recall: float
-    f1_score: float
-    auc: float
-
-
-class ResultadoEntrenamiento(BaseModel):
-    """
-    Pydantic model for training results
-    """
-
-    modelo: str
-    total_registros: int
-    registros_train: int
-    registros_test: int
-    features_utilizadas: List[str]
-    metricas_train: MetricasModelo
-    metricas_test: MetricasModelo
-    tiempo_entrenamiento_segundos: float
-    arquitectura: Dict[str, Any]
-    resumen: str
-
-
-class ComparacionModelos(BaseModel):
-    """
-    Pydantic model for model comparison results
-    """
-
-    mejor_modelo: str
-    razon_mejor_desempeno: str
-    modelo_mas_facil_desplegar: str
-    razon_facilidad_despliegue: str
-    diferencias_clave: List[str]
-    recomendacion_final: str
-
-
-class ResultadoCompletoModelos(BaseModel):
-    """
-    Pydantic model for complete modeling results (both models + comparison)
-    """
-
-    red_neuronal: ResultadoEntrenamiento
-    random_forest: ResultadoEntrenamiento
-    comparacion: ComparacionModelos
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"{nombre_modelo}_{timestamp}.{extension}"
 
 
 def parse_date(date_value: Any) -> date_type:
     """
-    Parse date from various formats (datetime, string, etc.)
+    Parsear fecha desde varios formatos (datetime, string, etc.)
     """
     if pd.isna(date_value):
         raise ValueError("Date value cannot be null")
@@ -220,7 +76,7 @@ def parse_date(date_value: Any) -> date_type:
 
 def parse_bool(value: Any) -> bool:
     """
-    Parse boolean from various formats
+    Parsear booleano desde varios formatos
     """
     if pd.isna(value):
         return False
@@ -235,14 +91,14 @@ def parse_bool(value: Any) -> bool:
 
 async def process_excel_upload(file: BinaryIO, session: Session) -> Dict[str, Any]:
     """
-    Process uploaded Excel file and insert data into database
+    Procesar archivo Excel cargado e insertar datos en base de datos
 
     Args:
-        file: Binary file object of the Excel file
-        session: Database session
+        file: Objeto de archivo binario del Excel
+        session: Sesión de base de datos
 
     Returns:
-        Dictionary with statistics about inserted records
+        Diccionario con estadísticas de registros insertados
     """
     stats = {
         "pacientes_insertados": 0,
@@ -255,10 +111,10 @@ async def process_excel_upload(file: BinaryIO, session: Session) -> Dict[str, An
     }
 
     try:
-        # Read Excel file
+        # Leer archivo Excel
         excel_data = pd.read_excel(file, sheet_name=None, engine="openpyxl")
 
-        # Verify required sheets exist
+        # Verificar que existan las hojas requeridas
         required_sheets = ["Pacientes", "Consultas", "Laboratorios"]
         for sheet in required_sheets:
             if sheet not in excel_data:
@@ -266,13 +122,13 @@ async def process_excel_upload(file: BinaryIO, session: Session) -> Dict[str, An
                     f"Hoja requerida '{sheet}' no encontrada en el archivo Excel"
                 )
 
-        # Process Pacientes sheet
+        # Procesar hoja de Pacientes
         df_pacientes = excel_data["Pacientes"]
         for _, row in df_pacientes.iterrows():
             try:
                 id_paciente = str(row["id_paciente"])
 
-                # Check if patient already exists
+                # Verificar si el paciente ya existe
                 existing_paciente = session.get(Paciente, id_paciente)
 
                 zona_res_value = row["zona_residencia"]
@@ -293,12 +149,12 @@ async def process_excel_upload(file: BinaryIO, session: Session) -> Dict[str, An
                 }
 
                 if existing_paciente:
-                    # Update existing patient
+                    # Actualizar paciente existente
                     for key, value in paciente_data.items():
                         setattr(existing_paciente, key, value)
                     stats["pacientes_actualizados"] += 1
                 else:
-                    # Create new patient
+                    # Crear nuevo paciente
                     paciente = Paciente(**paciente_data)
                     session.add(paciente)
                     stats["pacientes_insertados"] += 1
@@ -308,16 +164,16 @@ async def process_excel_upload(file: BinaryIO, session: Session) -> Dict[str, An
                     f"Error en paciente {row.get('id_paciente', 'desconocido')}: {str(e)}"
                 )
 
-        # Commit pacientes before processing consultas/laboratorios
+        # Commit de pacientes antes de procesar consultas/laboratorios
         session.commit()
 
-        # Process Consultas sheet
+        # Procesar hoja de Consultas
         df_consultas = excel_data["Consultas"]
         for _, row in df_consultas.iterrows():
             try:
                 id_consulta = str(row["id_consulta"])
 
-                # Check if consulta already exists
+                # Verificar si la consulta ya existe
                 existing_consulta = session.get(Consulta, id_consulta)
 
                 consulta_data = {
@@ -330,12 +186,12 @@ async def process_excel_upload(file: BinaryIO, session: Session) -> Dict[str, An
                 }
 
                 if existing_consulta:
-                    # Update existing consulta
+                    # Actualizar consulta existente
                     for key, value in consulta_data.items():
                         setattr(existing_consulta, key, value)
                     stats["consultas_actualizadas"] += 1
                 else:
-                    # Create new consulta
+                    # Crear nueva consulta
                     consulta = Consulta(**consulta_data)
                     session.add(consulta)
                     stats["consultas_insertadas"] += 1
@@ -345,19 +201,19 @@ async def process_excel_upload(file: BinaryIO, session: Session) -> Dict[str, An
                     f"Error en consulta {row.get('id_consulta', 'desconocido')}: {str(e)}"
                 )
 
-        # Commit consultas
+        # Commit de consultas
         session.commit()
 
-        # Process Laboratorios sheet
+        # Procesar hoja de Laboratorios
         df_laboratorios = excel_data["Laboratorios"]
         for _, row in df_laboratorios.iterrows():
             try:
                 id_lab = str(row["id_lab"])
 
-                # Check if laboratorio already exists
+                # Verificar si el laboratorio ya existe
                 existing_lab = session.get(Laboratorio, id_lab)
 
-                # Parse optional fields
+                # Parsear campos opcionales
                 resultado_value = row["resultado"]
                 resultado = str(resultado_value) if pd.notna(resultado_value) else None  # type: ignore[arg-type]
 
@@ -382,12 +238,12 @@ async def process_excel_upload(file: BinaryIO, session: Session) -> Dict[str, An
                 }
 
                 if existing_lab:
-                    # Update existing laboratorio
+                    # Actualizar laboratorio existente
                     for key, value in laboratorio_data.items():
                         setattr(existing_lab, key, value)
                     stats["laboratorios_actualizados"] += 1
                 else:
-                    # Create new laboratorio
+                    # Crear nuevo laboratorio
                     laboratorio = Laboratorio(**laboratorio_data)
                     session.add(laboratorio)
                     stats["laboratorios_insertados"] += 1
@@ -397,7 +253,7 @@ async def process_excel_upload(file: BinaryIO, session: Session) -> Dict[str, An
                     f"Error en laboratorio {row.get('id_lab', 'desconocido')}: {str(e)}"
                 )
 
-        # Final commit
+        # Commit final
         session.commit()
 
     except Exception as e:
@@ -411,15 +267,18 @@ async def get_dias_entre_lab_y_diagnostico(
     session: Session,
 ) -> List[PacienteLabAnalysis]:
     """
-    Execute SQL query to calculate days between first lab test and diagnosis date
+    Calcular días entre prueba de laboratorio y diagnóstico
+
+    Ejecuta consulta SQL para calcular días entre la primera prueba de
+    laboratorio y la fecha de diagnóstico.
 
     Args:
-        session: Database session
+        session: Sesión de base de datos
 
     Returns:
-        List of PacienteLabAnalysis objects with patient data and calculated days
+        Lista de objetos PacienteLabAnalysis con datos del paciente y días calculados
     """
-    # Pure SQL query to calculate days between first lab test and diagnosis
+    # Consulta SQL para calcular días entre primera prueba de laboratorio y diagnóstico
     query = text("""
         SELECT 
             p.id_paciente,
@@ -451,10 +310,10 @@ async def get_dias_entre_lab_y_diagnostico(
     result = session.execute(query)
     rows = result.fetchall()
 
-    # Convert rows to Pydantic models
+    # Convertir filas a modelos Pydantic
     pacientes_analysis = []
     for row in rows:
-        # Determine consistency message (only show when there's an issue)
+        # Determinar mensaje de consistencia (solo mostrar cuando hay un problema)
         mensaje_consistencia = None
         if row.primera_fecha_lab is None:
             mensaje_consistencia = "Sin datos de laboratorio"
@@ -485,16 +344,18 @@ async def get_pacientes_sin_actividad_reciente(
     session: Session,
 ) -> List[PacienteActividadReciente]:
     """
-    Execute SQL query to identify patients without recent activity (no consultations in last 90 days)
+    Identificar pacientes sin actividad reciente
+
+    Ejecuta consulta SQL para identificar pacientes sin consultas en los últimos 90 días.
 
     Args:
-        session: Database session
+        session: Sesión de base de datos
 
     Returns:
-        List of PacienteActividadReciente objects with patients who haven't had consultations
-        in the last 90 days or never had any consultations
+        Lista de objetos PacienteActividadReciente con pacientes que no han tenido
+        consultas en los últimos 90 días o nunca han tenido consultas
     """
-    # Pure SQL query to get patients without recent activity
+    # Consulta SQL para obtener pacientes sin actividad reciente
     query = text("""
         SELECT 
             p.id_paciente,
@@ -533,10 +394,10 @@ async def get_pacientes_sin_actividad_reciente(
     result = session.execute(query)
     rows = result.fetchall()
 
-    # Convert rows to Pydantic models
+    # Convertir filas a modelos Pydantic
     pacientes_inactivos = []
     for row in rows:
-        # Determine activity status
+        # Determinar estado de actividad
         if row.ultima_consulta is None:
             estado_actividad = "Sin consultas registradas"
         else:
@@ -565,19 +426,21 @@ async def get_pacientes_sin_actividad_reciente(
 
 async def get_dashboard_por_tipo_cancer(session: Session) -> List[DashboardTipoCancer]:
     """
-    Execute SQL query to generate a dashboard by cancer type with key metrics
+    Generar dashboard por tipo de cáncer
+
+    Ejecuta consulta SQL para generar un dashboard por tipo de cáncer con métricas clave.
 
     Args:
-        session: Database session
+        session: Sesión de base de datos
 
     Returns:
-        List of DashboardTipoCancer objects with aggregated statistics per cancer type:
-        - Total number of patients
-        - Average age
-        - Number of consultations in the last 6 months
-        - Total number of lab tests
+        Lista de objetos DashboardTipoCancer con estadísticas agregadas por tipo de cáncer:
+        - Total de pacientes
+        - Edad promedio
+        - Número de consultas en los últimos 6 meses
+        - Total de pruebas de laboratorio
     """
-    # Pure SQL query to generate dashboard metrics by cancer type
+    # Consulta SQL para generar métricas de dashboard por tipo de cáncer
     query = text("""
         SELECT 
             p.tipo_cancer,
@@ -598,7 +461,7 @@ async def get_dashboard_por_tipo_cancer(session: Session) -> List[DashboardTipoC
     result = session.execute(query)
     rows = result.fetchall()
 
-    # Convert rows to Pydantic models
+    # Convertir filas a modelos Pydantic
     dashboard_data = []
     for row in rows:
         dashboard_data.append(
@@ -614,262 +477,525 @@ async def get_dashboard_por_tipo_cancer(session: Session) -> List[DashboardTipoC
     return dashboard_data
 
 
-async def procesar_limpieza_datos(session: Session) -> ReporteProcesamiento:
+class NormalizadorCategorico:
     """
-    Execute data cleaning and standardization process
+    Transformador compatible con sklearn para normalización de variables categóricas
+
+    Normaliza texto capitalizando la primera letra y eliminando espacios extra.
+    Rastrea cambios para propósitos de reporte.
+    """
+
+    def __init__(self) -> None:
+        self.normalizaciones: List[NormalizacionCampo] = []
+
+    def normalizar_texto(self, valor: Any) -> Optional[str]:
+        """Normalizar texto: capitalizar primera letra, eliminar espacios extra"""
+        if pd.isna(valor) or valor == "":
+            return None
+        return str(valor).strip().capitalize()
+
+    def fit(self, X: pd.DataFrame, y: Any = None) -> "NormalizadorCategorico":
+        """Método fit (requerido por sklearn, pero no usado en este transformador)"""
+        return self
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """
+        Transformar columnas categóricas normalizando el texto
+
+        Args:
+            X: DataFrame con columnas categóricas
+
+        Returns:
+            DataFrame transformado
+        """
+        X_copia = X.copy()
+        self.normalizaciones = []
+
+        columnas_categoricas = X_copia.select_dtypes(include=["object"]).columns
+
+        for col in columnas_categoricas:
+            if col in X_copia.columns:
+                # Obtener valores únicos antes de normalización
+                valores_unicos_antes = int(X_copia[col].nunique())
+                valores_antes = X_copia[col].dropna().unique()
+
+                # Aplicar normalización
+                X_copia[col] = X_copia[col].apply(self.normalizar_texto)
+
+                # Obtener valores únicos después de normalización
+                valores_unicos_despues = int(X_copia[col].nunique())
+
+                # Rastrear cambios
+                mapeo_cambios: Dict[str, str] = {}
+                registros_modificados = 0
+
+                for valor_original in valores_antes:
+                    valor_normalizado = self.normalizar_texto(valor_original)
+                    if valor_normalizado != valor_original:
+                        mapeo_cambios[str(valor_original)] = str(valor_normalizado)
+                        registros_modificados += int((X[col] == valor_original).sum())
+
+                if mapeo_cambios:
+                    ejemplos = dict(list(mapeo_cambios.items())[:5])
+                    self.normalizaciones.append(
+                        NormalizacionCampo(
+                            campo=col,
+                            registros_modificados=registros_modificados,
+                            valores_unicos_antes=valores_unicos_antes,
+                            valores_unicos_despues=valores_unicos_despues,
+                            ejemplos_cambios=ejemplos,
+                        )
+                    )
+
+        return X_copia
+
+
+class ImputadorAdaptativoValoresFaltantes:
+    """
+    Transformador compatible con sklearn para imputación adaptativa de valores faltantes
+
+    Estrategia de imputación basada en porcentaje de valores faltantes:
+    - < 5%: Rellenar con valores por defecto
+    - 5-20%: Imputar con moda (categóricos) o mediana (numéricos)
+    - > 20%: No imputar (demasiado arriesgado)
+    """
+
+    def __init__(self) -> None:
+        self.valores_faltantes: List[AnalisisValoresFaltantes] = []
+        self.valores_imputacion: Dict[str, Any] = {}
+        self.valores_defecto = {
+            "zona_residencia": "Desconocida",
+            "resultado": "Sin resultado",
+            "unidad": "N/a",
+            "resultado_numerico": 0.0,  # Resultados de laboratorio sin valor = 0
+        }
+
+    def fit(
+        self, X: pd.DataFrame, y: Any = None
+    ) -> "ImputadorAdaptativoValoresFaltantes":
+        """
+        Ajustar imputador calculando estadísticas para cada columna
+
+        Args:
+            X: DataFrame a ajustar
+            y: Ignorado (para compatibilidad con sklearn)
+
+        Returns:
+            Instancia ajustada del imputador
+        """
+        self.valores_imputacion = {}
+
+        for col in X.columns:
+            porcentaje_faltante = (X[col].isna().sum() / len(X)) * 100
+
+            if porcentaje_faltante > 0:
+                # Verificar si hay valor por defecto definido
+                if col in self.valores_defecto:
+                    self.valores_imputacion[col] = self.valores_defecto[col]
+                elif porcentaje_faltante < 5:
+                    # Para pocos valores faltantes, usar moda/mediana
+                    if X[col].dtype in ["object", "category"]:
+                        valor_moda = X[col].mode()
+                        self.valores_imputacion[col] = (
+                            valor_moda[0] if len(valor_moda) > 0 else "Desconocido"
+                        )
+                    else:
+                        self.valores_imputacion[col] = X[col].median()
+                elif porcentaje_faltante < 20:
+                    # Usar moda para categóricos, mediana para numéricos
+                    if X[col].dtype in ["object", "category"]:
+                        valor_moda = X[col].mode()
+                        self.valores_imputacion[col] = (
+                            valor_moda[0] if len(valor_moda) > 0 else None
+                        )
+                    else:
+                        self.valores_imputacion[col] = X[col].median()
+                else:
+                    # Para > 20% de valores faltantes en columnas numéricas, imputar con 0
+                    # Esto es crítico para columnas como resultado_numerico en laboratorios
+                    if X[col].dtype in ["float64", "float32", "int64", "int32"]:
+                        self.valores_imputacion[col] = 0.0
+                    # Para categóricos con muchos faltantes, no imputar (demasiado arriesgado)
+
+        return self
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """
+        Transformar DataFrame imputando valores faltantes
+
+        Args:
+            X: DataFrame a transformar
+
+        Returns:
+            DataFrame transformado con valores imputados
+        """
+        X_copia = X.copy()
+        self.valores_faltantes = []
+
+        for col in X.columns:
+            total = len(X_copia)
+            nulos_antes = X_copia[col].isna().sum()
+            porcentaje = (nulos_antes / total * 100) if total > 0 else 0
+
+            if (
+                col in self.valores_imputacion
+                and self.valores_imputacion[col] is not None
+            ):
+                X_copia[col] = X_copia[col].fillna(self.valores_imputacion[col])
+                nulos_despues = X_copia[col].isna().sum()
+                registros_imputados = nulos_antes - nulos_despues
+
+                if X_copia[col].dtype in ["object", "category"]:
+                    accion = f"Imputados con '{self.valores_imputacion[col]}' ({registros_imputados} registros)"
+                else:
+                    valor = self.valores_imputacion[col]
+                    if porcentaje >= 20:
+                        accion = f"Imputados con 0 ({registros_imputados} registros) - alta tasa de faltantes ({porcentaje:.1f}%)"
+                    else:
+                        accion = f"Imputados con mediana ({valor:.2f}) - {registros_imputados} registros"
+            elif nulos_antes > 0 and porcentaje >= 20:
+                nulos_despues = nulos_antes
+                accion = f"No imputado (categórico) - porcentaje alto ({porcentaje:.2f}%). Requiere análisis manual"
+            else:
+                nulos_despues = nulos_antes
+                accion = "No requiere imputación - sin valores faltantes"
+
+            if nulos_antes > 0 or porcentaje > 0:
+                self.valores_faltantes.append(
+                    AnalisisValoresFaltantes(
+                        campo=col,
+                        total_registros=total,
+                        valores_faltantes=nulos_despues,
+                        porcentaje_faltante=round(
+                            (nulos_despues / total * 100) if total > 0 else 0, 2
+                        ),
+                        recomendacion=accion,
+                    )
+                )
+
+        return X_copia
+
+
+class WinsorizadorOutliersIQR:
+    """
+    Transformador compatible con sklearn para corrección de outliers usando método IQR
+
+    Aplica Winsorization: limita valores extremos a límites basados en IQR
+    """
+
+    def __init__(self, multiplicador_iqr: float = 1.5) -> None:
+        self.multiplicador_iqr = multiplicador_iqr
+        self.outliers_list: List[OutliersDetectados] = []
+        self.limites: Dict[str, Dict[str, float]] = {}
+
+    def fit(self, X: pd.DataFrame, y: Any = None) -> "WinsorizadorOutliersIQR":
+        """
+        Ajustar winsorizador calculando límites IQR para columnas numéricas
+
+        Args:
+            X: DataFrame a ajustar
+            y: Ignorado (para compatibilidad con sklearn)
+
+        Returns:
+            Instancia ajustada del winsorizador
+        """
+        self.limites = {}
+        columnas_numericas = X.select_dtypes(include=[np.number]).columns
+
+        for col in columnas_numericas:
+            if X[col].notna().sum() > 0:
+                q1 = X[col].quantile(0.25)
+                q3 = X[col].quantile(0.75)
+                iqr = q3 - q1
+                limite_inferior = q1 - self.multiplicador_iqr * iqr
+                limite_superior = q3 + self.multiplicador_iqr * iqr
+
+                self.limites[col] = {
+                    "q1": q1,
+                    "q3": q3,
+                    "iqr": iqr,
+                    "inferior": limite_inferior,
+                    "superior": limite_superior,
+                }
+
+        return self
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """
+        Transformar DataFrame winsorizando outliers
+
+        Args:
+            X: DataFrame a transformar
+
+        Returns:
+            DataFrame transformado con valores winsorizados
+        """
+        X_copia = X.copy()
+        self.outliers_list = []
+
+        for col, limites in self.limites.items():
+            if col in X_copia.columns:
+                # Detectar outliers antes de corrección
+                mascara_outliers = (X_copia[col] < limites["inferior"]) | (
+                    X_copia[col] > limites["superior"]
+                )
+                conteo_outliers_antes = mascara_outliers.sum()
+                valores_outliers_raw = (
+                    X_copia.loc[mascara_outliers, col].sort_values().head(20).tolist()
+                )
+
+                # Aplicar winsorization
+                X_copia[col] = X_copia[col].clip(
+                    lower=limites["inferior"], upper=limites["superior"]
+                )
+
+                total = X_copia[col].notna().sum()
+                porcentaje_outliers = (
+                    (conteo_outliers_antes / total * 100) if total > 0 else 0
+                )
+
+                self.outliers_list.append(
+                    OutliersDetectados(
+                        campo=col,
+                        total_registros=int(total),
+                        q1=round(float(limites["q1"]), 2),
+                        q3=round(float(limites["q3"]), 2),
+                        iqr=round(float(limites["iqr"]), 2),
+                        limite_inferior=round(float(limites["inferior"]), 2),
+                        limite_superior=round(float(limites["superior"]), 2),
+                        outliers_detectados=int(conteo_outliers_antes),
+                        porcentaje_outliers=round(float(porcentaje_outliers), 2),
+                        valores_outliers=[float(v) for v in valores_outliers_raw],
+                    )
+                )
+
+        return X_copia
+
+
+def generar_resumen_procesamiento(
+    normalizaciones: List[NormalizacionCampo],
+    valores_faltantes: List[AnalisisValoresFaltantes],
+    outliers_list: List[OutliersDetectados],
+) -> Dict[str, Any]:
+    """
+    Generate executive summary of data processing
 
     Args:
-        session: Database session
+        normalizaciones: List of normalization results
+        valores_faltantes: List of missing values imputation results
+        outliers_list: List of outlier correction results
 
     Returns:
-        ReporteProcesamiento with:
-        - Categorical variable normalizations
-        - Missing values analysis
-        - Outlier detection using IQR method
+        Dictionary with summary statistics
     """
-    normalizaciones: List[NormalizacionCampo] = []
-    valores_faltantes: List[AnalisisValoresFaltantes] = []
-    outliers_list: List[OutliersDetectados] = []
+    total_registros_normalizados = sum(n.registros_modificados for n in normalizaciones)
+    total_valores_imputados = sum(
+        v.total_registros - v.valores_faltantes for v in valores_faltantes
+    )
+    total_outliers_corregidos = sum(o.outliers_detectados for o in outliers_list)
 
-    # ===========================================================================
-    # 1. NORMALIZACIÓN DE VARIABLES CATEGÓRICAS
-    # ===========================================================================
-
-    # Campos categóricos a normalizar por tabla
-    campos_categoricos = {
-        "paciente": [
-            "sexo",
-            "zona_residencia",
-            "tipo_cancer",
-            "estadio",
-            "aseguradora",
-        ],
-        "consulta": ["motivo", "prioridad", "especialista"],
-        "laboratorio": ["tipo_prueba", "resultado", "unidad"],
-    }
-
-    def normalizar_texto(valor: Optional[str]) -> Optional[str]:
-        """Normaliza texto: capitaliza primera letra, elimina espacios extra"""
-        if valor is None or valor == "":
-            return None
-        return valor.strip().capitalize()
-
-    # Normalizar cada tabla y campo
-    for tabla, campos in campos_categoricos.items():
-        for campo in campos:
-            # Obtener valores únicos antes de normalización
-            query_antes = text(
-                f"SELECT DISTINCT {campo} FROM {tabla} WHERE {campo} IS NOT NULL"
-            )
-            result_antes = session.execute(query_antes)
-            valores_antes = [row[0] for row in result_antes.fetchall()]
-            valores_unicos_antes = len(valores_antes)
-
-            # Crear mapeo de normalización
-            mapeo_cambios: Dict[str, str] = {}
-            registros_modificados = 0
-
-            for valor_original in valores_antes:
-                valor_normalizado = normalizar_texto(valor_original)
-                if valor_normalizado != valor_original:
-                    mapeo_cambios[valor_original] = valor_normalizado  # type: ignore[assignment]
-                    # Actualizar registros
-                    update_query = text(
-                        f"UPDATE {tabla} SET {campo} = :nuevo WHERE {campo} = :viejo"
-                    )
-                    result = session.execute(
-                        update_query,
-                        {"nuevo": valor_normalizado, "viejo": valor_original},
-                    )
-                    registros_modificados += result.rowcount  # type: ignore[attr-defined]
-
-            session.commit()
-
-            # Obtener valores únicos después de normalización
-            query_despues = text(
-                f"SELECT DISTINCT {campo} FROM {tabla} WHERE {campo} IS NOT NULL"
-            )
-            result_despues = session.execute(query_despues)
-            valores_unicos_despues = len(result_despues.fetchall())
-
-            # Agregar al reporte (solo si hubo cambios)
-            if mapeo_cambios:
-                # Limitar ejemplos a máximo 5
-                ejemplos = dict(list(mapeo_cambios.items())[:5])
-                normalizaciones.append(
-                    NormalizacionCampo(
-                        campo=f"{tabla}.{campo}",
-                        registros_modificados=registros_modificados,
-                        valores_unicos_antes=valores_unicos_antes,
-                        valores_unicos_despues=valores_unicos_despues,
-                        ejemplos_cambios=ejemplos,
-                    )
-                )
-
-    # ===========================================================================
-    # 2. ANÁLISIS DE VALORES FALTANTES
-    # ===========================================================================
-
-    # Analizar campos con posibles valores faltantes
-    campos_analizar_null = [
-        ("paciente", "zona_residencia"),
-        ("laboratorio", "resultado"),
-        ("laboratorio", "resultado_numerico"),
-        ("laboratorio", "unidad"),
-    ]
-
-    for tabla, campo in campos_analizar_null:
-        # Contar total y nulos
-        query_analisis = text(f"""
-            SELECT 
-                COUNT(*) as total,
-                COUNT(*) FILTER (WHERE {campo} IS NULL) as nulos
-            FROM {tabla}
-        """)
-        result = session.execute(query_analisis)
-        row = result.fetchone()
-
-        if row:
-            total = row.total
-            nulos = row.nulos
-            porcentaje = (nulos / total * 100) if total > 0 else 0
-
-            # Determinar recomendación
-            if porcentaje < 5:
-                recomendacion = "Mantener como NULL - porcentaje bajo"
-            elif porcentaje < 20:
-                recomendacion = "Considerar imputación con moda/mediana"
-            else:
-                recomendacion = (
-                    "Requiere análisis especial - alto porcentaje de faltantes"
-                )
-
-            valores_faltantes.append(
-                AnalisisValoresFaltantes(
-                    campo=f"{tabla}.{campo}",
-                    total_registros=total,
-                    valores_faltantes=nulos,
-                    porcentaje_faltante=round(porcentaje, 2),
-                    recomendacion=recomendacion,
-                )
-            )
-
-    # ===========================================================================
-    # 3. DETECCIÓN DE OUTLIERS USANDO IQR
-    # ===========================================================================
-
-    # Campos numéricos a analizar
-    campos_numericos = [
-        ("paciente", "edad"),
-        ("laboratorio", "resultado_numerico"),
-    ]
-
-    for tabla, campo in campos_numericos:
-        # Calcular Q1, Q3 e IQR
-        query_stats = text(f"""
-            SELECT 
-                PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY {campo}) as q1,
-                PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY {campo}) as q3,
-                COUNT(*) as total
-            FROM {tabla}
-            WHERE {campo} IS NOT NULL
-        """)
-        result = session.execute(query_stats)
-        row = result.fetchone()
-
-        if row and row.total > 0:
-            q1 = float(row.q1)
-            q3 = float(row.q3)
-            iqr = q3 - q1
-            limite_inferior = q1 - 1.5 * iqr
-            limite_superior = q3 + 1.5 * iqr
-            total = row.total
-
-            # Detectar outliers
-            query_outliers = text(f"""
-                SELECT {campo}
-                FROM {tabla}
-                WHERE {campo} IS NOT NULL
-                  AND ({campo} < :limite_inf OR {campo} > :limite_sup)
-                ORDER BY {campo}
-                LIMIT 20
-            """)
-            result_outliers = session.execute(
-                query_outliers,
-                {"limite_inf": limite_inferior, "limite_sup": limite_superior},
-            )
-            valores_outliers_raw = [float(row[0]) for row in result_outliers.fetchall()]
-
-            # Contar total de outliers
-            query_count_outliers = text(f"""
-                SELECT COUNT(*)
-                FROM {tabla}
-                WHERE {campo} IS NOT NULL
-                  AND ({campo} < :limite_inf OR {campo} > :limite_sup)
-            """)
-            result_count = session.execute(
-                query_count_outliers,
-                {"limite_inf": limite_inferior, "limite_sup": limite_superior},
-            )
-            count_outliers = result_count.scalar() or 0
-
-            porcentaje_outliers = (count_outliers / total * 100) if total > 0 else 0
-
-            outliers_list.append(
-                OutliersDetectados(
-                    campo=f"{tabla}.{campo}",
-                    total_registros=total,
-                    q1=round(q1, 2),
-                    q3=round(q3, 2),
-                    iqr=round(iqr, 2),
-                    limite_inferior=round(limite_inferior, 2),
-                    limite_superior=round(limite_superior, 2),
-                    outliers_detectados=count_outliers,
-                    porcentaje_outliers=round(porcentaje_outliers, 2),
-                    valores_outliers=valores_outliers_raw,
-                )
-            )
-
-    # ===========================================================================
-    # 4. RESUMEN EJECUTIVO
-    # ===========================================================================
-
-    resumen = {
+    return {
         "timestamp": datetime.now().isoformat(),
-        "total_normalizaciones": len(normalizaciones),
-        "total_registros_modificados": sum(
-            n.registros_modificados for n in normalizaciones
-        ),
-        "campos_con_valores_faltantes": len(valores_faltantes),
-        "campos_con_outliers": len(outliers_list),
-        "total_outliers_detectados": sum(o.outliers_detectados for o in outliers_list),
-        "estado": "Procesamiento completado exitosamente",
+        "transformaciones_aplicadas": {
+            "normalizacion_categoricas": {
+                "campos_procesados": len(normalizaciones),
+                "registros_modificados": total_registros_normalizados,
+                "descripcion": "Capitalización y estandarización de texto",
+            },
+            "imputacion_valores_faltantes": {
+                "campos_procesados": len(valores_faltantes),
+                "registros_imputados": total_valores_imputados,
+                "descripcion": "Relleno de valores NULL con moda/mediana o valores por defecto",
+            },
+            "correccion_outliers": {
+                "campos_procesados": len(outliers_list),
+                "outliers_corregidos": total_outliers_corregidos,
+                "descripcion": "Winsorization - valores extremos limitados a límites IQR",
+            },
+        },
+        "total_registros_modificados": total_registros_normalizados
+        + total_valores_imputados
+        + total_outliers_corregidos,
+        "estado": "✓ Procesamiento y transformaciones completados exitosamente",
+        "advertencia": "Los datos en la base de datos han sido modificados permanentemente",
     }
+
+
+async def cargar_datos_a_dataframes(session: Session) -> Dict[str, pd.DataFrame]:
+    """
+    Cargar todos los datos de la base de datos a DataFrames de pandas
+
+    Args:
+        session: Sesión de base de datos
+
+    Returns:
+        Diccionario con nombres de tablas como claves y DataFrames como valores
+    """
+    tablas = {
+        "paciente": "SELECT * FROM paciente",
+        "consulta": "SELECT * FROM consulta",
+        "laboratorio": "SELECT * FROM laboratorio",
+    }
+
+    dataframes = {}
+    for nombre_tabla, consulta in tablas.items():
+        df = pd.read_sql(consulta, session.bind)
+        dataframes[nombre_tabla] = df
+
+    return dataframes
+
+
+async def guardar_dataframes_a_db(
+    session: Session, dataframes: Dict[str, pd.DataFrame]
+) -> None:
+    """
+    Guardar DataFrames limpios de vuelta a la base de datos
+
+    Args:
+        session: Sesión de base de datos
+        dataframes: Diccionario con nombres de tablas y DataFrames limpios
+    """
+    # Orden correcto para eliminar respetando restricciones de clave foránea
+    # Primero tablas hijas (con FK), luego tabla padre
+    orden_eliminacion = ["laboratorio", "consulta", "paciente"]
+
+    # Eliminar registros existentes en el orden correcto
+    for nombre_tabla in orden_eliminacion:
+        if nombre_tabla in dataframes:
+            session.execute(text(f"DELETE FROM {nombre_tabla}"))
+
+    # Mapeo de columnas de fecha por tabla
+    columnas_fecha = {
+        "paciente": ["fecha_dx"],
+        "consulta": ["fecha_consulta"],
+        "laboratorio": ["fecha_muestra"],
+    }
+
+    # Insertar datos limpios usando SQLModel para mantener tipos correctos
+    for nombre_tabla, df in dataframes.items():
+        # Convertir columnas de fecha a objetos date de Python
+        if nombre_tabla in columnas_fecha:
+            for col_fecha in columnas_fecha[nombre_tabla]:
+                if col_fecha in df.columns:
+                    # Convertir a datetime y extraer solo la fecha
+                    df[col_fecha] = pd.to_datetime(df[col_fecha]).dt.date
+
+        # Convertir DataFrame a lista de diccionarios e insertar fila por fila
+        # usando los modelos SQLModel para mantener los tipos correctos
+        if nombre_tabla == "paciente":
+            for _, row in df.iterrows():
+                paciente = Paciente(**row.to_dict())
+                session.add(paciente)
+        elif nombre_tabla == "consulta":
+            for _, row in df.iterrows():
+                consulta = Consulta(**row.to_dict())
+                session.add(consulta)
+        elif nombre_tabla == "laboratorio":
+            for _, row in df.iterrows():
+                laboratorio = Laboratorio(**row.to_dict())
+                session.add(laboratorio)
+
+    session.commit()
+
+
+async def procesar_limpieza_datos(session: Session) -> ReporteProcesamiento:
+    """
+    Ejecutar pipeline de limpieza y estandarización de datos usando sklearn y pandas
+
+    Esta función implementa un Pipeline de scikit-learn con tres transformadores:
+    1. NormalizadorCategorico: Normalizar variables categóricas
+    2. ImputadorAdaptativoValoresFaltantes: Imputar valores faltantes adaptativamente
+    3. WinsorizadorOutliersIQR: Corregir outliers usando método IQR
+
+    El pipeline usa pandas para manipulación eficiente de datos en lugar de iteraciones SQL.
+    Todas las transformaciones modifican los datos en la base de datos permanentemente.
+
+    Args:
+        session: Sesión de base de datos
+
+    Returns:
+        ReporteProcesamiento con reporte completo de transformaciones incluyendo:
+        - Normalizaciones de variables categóricas
+        - Imputación de valores faltantes
+        - Correcciones de outliers
+        - Resumen ejecutivo
+    """
+    # Cargar datos de la base de datos a DataFrames de pandas
+    dataframes = await cargar_datos_a_dataframes(session)
+
+    # Inicializar colecciones de resultados
+    todas_normalizaciones: List[NormalizacionCampo] = []
+    todos_valores_faltantes: List[AnalisisValoresFaltantes] = []
+    todos_outliers: List[OutliersDetectados] = []
+    dataframes_limpios: Dict[str, pd.DataFrame] = {}
+
+    # Procesar cada tabla por separado con su propio pipeline de sklearn
+    for nombre_tabla, df in dataframes.items():
+        # Inicializar transformadores
+        normalizador_cat = NormalizadorCategorico()
+        imputador_faltantes = ImputadorAdaptativoValoresFaltantes()
+        winsorizador_outliers = WinsorizadorOutliersIQR()
+
+        # Crear pipeline de sklearn con tres pasos de transformación
+        pipeline = Pipeline(
+            steps=[
+                ("normalizar", normalizador_cat),
+                ("imputar", imputador_faltantes),
+                ("winsorizar", winsorizador_outliers),
+            ]
+        )
+
+        # Ajustar y transformar datos usando el pipeline
+        df_limpio = pipeline.fit_transform(df)
+
+        # Almacenar dataframe limpio
+        dataframes_limpios[nombre_tabla] = df_limpio
+
+        # Recolectar reportes de cada transformador con prefijos de tabla
+        for norm in normalizador_cat.normalizaciones:
+            norm.campo = f"{nombre_tabla}.{norm.campo}"
+            todas_normalizaciones.append(norm)
+
+        for val_falt in imputador_faltantes.valores_faltantes:
+            val_falt.campo = f"{nombre_tabla}.{val_falt.campo}"
+            todos_valores_faltantes.append(val_falt)
+
+        for outlier in winsorizador_outliers.outliers_list:
+            outlier.campo = f"{nombre_tabla}.{outlier.campo}"
+            todos_outliers.append(outlier)
+
+    # Guardar datos limpios de vuelta a la base de datos
+    await guardar_dataframes_a_db(session, dataframes_limpios)
+
+    # Generar resumen ejecutivo
+    resumen = generar_resumen_procesamiento(
+        todas_normalizaciones, todos_valores_faltantes, todos_outliers
+    )
 
     return ReporteProcesamiento(
-        normalizaciones=normalizaciones,
-        valores_faltantes=valores_faltantes,
-        outliers=outliers_list,
+        normalizaciones=todas_normalizaciones,
+        valores_faltantes=todos_valores_faltantes,
+        outliers=todos_outliers,
         resumen=resumen,
     )
 
 
 async def generar_dataset_modelado(session: Session) -> List[DatasetModelado]:
     """
-    Generate modeling-ready dataset with aggregated features
+    Generar dataset listo para modelado con features agregados
 
     Args:
-        session: Database session
+        session: Sesión de base de datos
 
     Returns:
-        List of DatasetModelado objects - one row per patient with:
-        - All categorical variables
-        - Aggregated counts (consultations, labs)
-        - Averaged lab results by test type
-        - No null values (handled appropriately)
-        - Correct data types
+        Lista de objetos DatasetModelado - una fila por paciente con:
+        - Todas las variables categóricas
+        - Conteos agregados (consultas, laboratorios)
+        - Promedios de resultados de laboratorio por tipo de prueba
+        - Sin valores nulos (manejados apropiadamente)
+        - Tipos de datos correctos
     """
-    # Complex SQL query to generate aggregated dataset
+    # Consulta SQL compleja para generar dataset agregado
     query = text("""
         WITH paciente_consultas AS (
             SELECT 
@@ -923,623 +1049,104 @@ async def generar_dataset_modelado(session: Session) -> List[DatasetModelado]:
     result = session.execute(query)
     rows = result.fetchall()
 
-    # Convert rows to Pydantic models
+    # Convertir filas a modelos Pydantic
+    # Acceder a los valores por índice ya que text() retorna tuplas
     dataset = []
     for row in rows:
+        # Helper function para manejar None y NaN
+        def safe_float(val):
+            """Convertir valor a float, manejando None y NaN"""
+            if val is None or (isinstance(val, float) and pd.isna(val)):
+                return 0.0
+            return float(val)
+
         dataset.append(
             DatasetModelado(
-                sexo=row.sexo,
-                edad=row.edad,
-                zona_residencia=row.zona_residencia,
-                tipo_cancer=row.tipo_cancer,
-                estadio=row.estadio,
-                aseguradora=row.aseguradora,
-                count_consultas=row.count_consultas,
-                dias_desde_diagnostico=row.dias_desde_diagnostico,
-                count_laboratorios=row.count_laboratorios,
-                avg_resultado_numerico=round(float(row.avg_resultado_numerico), 2),
-                avg_biopsia=round(float(row.avg_biopsia), 2),
-                avg_vpH=round(float(row.avg_vph), 2),
-                avg_marcador_ca125=round(float(row.avg_marcador_ca125), 2),
-                avg_psa=round(float(row.avg_psa), 2),
-                avg_colonoscopia=round(float(row.avg_colonoscopia), 2),
-                adherencia_12m=row.adherencia_12m,
+                sexo=row[0],
+                edad=row[1],
+                zona_residencia=row[2],
+                tipo_cancer=row[3],
+                estadio=row[4],
+                aseguradora=row[5],
+                count_consultas=row[6] if row[6] is not None else 0,
+                dias_desde_diagnostico=row[7],
+                count_laboratorios=row[8] if row[8] is not None else 0,
+                avg_resultado_numerico=round(safe_float(row[9]), 2),
+                avg_biopsia=round(safe_float(row[10]), 2),
+                avg_vpH=round(safe_float(row[11]), 2),
+                avg_marcador_ca125=round(safe_float(row[12]), 2),
+                avg_psa=round(safe_float(row[13]), 2),
+                avg_colonoscopia=round(safe_float(row[14]), 2),
+                adherencia_12m=row[15],
             )
         )
 
     return dataset
 
 
-async def entrenar_ambos_modelos(session: Session) -> ResultadoCompletoModelos:
+async def generar_y_guardar_dataset_modelado(session: Session) -> RutaDataset:
     """
-    Train both Neural Network and Random Forest models and compare them
+    Genera un dataset consolidado listo para modelado y lo guarda en la carpeta ./data
+
+    Construye un único DataFrame que consolida:
+    - Información del paciente
+    - Número total de consultas
+    - Número total de laboratorios
+    - Promedio de resultados numéricos por tipo de prueba
+
+    El dataset generado incluye:
+    - Una fila por paciente
+    - Todas las variables agregadas
+    - Sin nulos (manejados apropiadamente)
+    - Con tipos de datos correctos
 
     Args:
-        session: Database session
+        session: Sesión de base de datos
 
     Returns:
-        ResultadoCompletoModelos with both models' results and comparison
+        RutaDataset con la ruta del archivo guardado y metadatos
     """
-    import time
-
-    import tensorflow as tf
-    from sklearn.ensemble import RandomForestClassifier
-    from sklearn.metrics import (
-        accuracy_score,
-        auc,
-        f1_score,
-        precision_score,
-        recall_score,
-        roc_curve,
-    )
-    from sklearn.model_selection import train_test_split
-    from sklearn.preprocessing import LabelEncoder, StandardScaler
-
-    # ===========================================================================
-    # 1. OBTENER DATASET (común para ambos modelos)
-    # ===========================================================================
+    # Obtener dataset usando la función existente
     dataset_list = await generar_dataset_modelado(session)
+
+    # Convertir a DataFrame
     df = pd.DataFrame([d.model_dump() for d in dataset_list])
 
-    if len(df) < 10:
-        raise ValueError("Dataset muy pequeño para entrenar (mínimo 10 registros)")
-
-    # ===========================================================================
-    # 2. PREPARACIÓN DE FEATURES (común para ambos)
-    # ===========================================================================
-    features_numericas = [
-        "edad",
-        "count_consultas",
-        "count_laboratorios",
-        "avg_resultado_numerico",
-        "avg_biopsia",
-        "avg_vpH",
-        "avg_marcador_ca125",
-        "avg_psa",
-        "avg_colonoscopia",
-    ]
-
-    features_categoricas = ["zona_residencia", "tipo_cancer"]
-
-    # Codificar variables categóricas
-    label_encoders = {}
-    df_encoded = df.copy()
-
-    for col in features_categoricas:
-        le = LabelEncoder()
-        df_encoded[f"{col}_encoded"] = le.fit_transform(df_encoded[col])
-        label_encoders[col] = le
-
-    # Lista final de features
-    features_finales = features_numericas + [
-        f"{col}_encoded" for col in features_categoricas
-    ]
-
-    # Preparar X e y
-    X = df_encoded[features_finales].values
-    y = df_encoded["adherencia_12m"].values
-
-    # División train/test
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
-
-    def calcular_metricas_modelo(
-        y_true: np.ndarray, y_pred_proba: np.ndarray
-    ) -> MetricasModelo:
-        """Calcular métricas de evaluación"""
-        y_pred = (y_pred_proba > 0.5).astype(int).flatten()
-
-        acc = accuracy_score(y_true, y_pred)
-        prec = precision_score(y_true, y_pred, zero_division=0.0)  # type: ignore[arg-type]
-        rec = recall_score(y_true, y_pred, zero_division=0.0)  # type: ignore[arg-type]
-        f1 = f1_score(y_true, y_pred, zero_division=0.0)  # type: ignore[arg-type]
-
-        # Calcular AUC
-        try:
-            fpr, tpr, _ = roc_curve(y_true, y_pred_proba)
-            auc_score = auc(fpr, tpr)
-        except Exception:
-            auc_score = 0.0
-
-        return MetricasModelo(
-            accuracy=round(float(acc), 4),
-            precision=round(float(prec), 4),
-            recall=round(float(rec), 4),
-            f1_score=round(float(f1), 4),
-            auc=round(float(auc_score), 4),
+    # Verificar que no haya NaN (deberían estar manejados en generar_dataset_modelado)
+    if df.isna().any().any():
+        logger.warning(
+            "Se encontraron valores NaN inesperados. Reemplazando con 0 como fallback."
         )
+        df = df.fillna(0)
 
-    # ===========================================================================
-    # 3. ENTRENAR RED NEURONAL
-    # ===========================================================================
-    inicio_nn = time.time()
+    # Crear carpeta data si no existe
+    workspace_root = Path(__file__).parent.parent.parent
+    carpeta_data = workspace_root / "data"
+    carpeta_data.mkdir(exist_ok=True)
 
-    # Normalización para NN
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
+    # Generar nombre de archivo con timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    nombre_archivo = f"dataset_modelado_{timestamp}.csv"
+    ruta_archivo = carpeta_data / nombre_archivo
 
-    # Construir red neuronal
-    modelo_nn = tf.keras.Sequential(  # type: ignore[attr-defined]
-        [
-            tf.keras.layers.Input(shape=(len(features_finales),)),  # type: ignore[attr-defined]
-            tf.keras.layers.Dense(64, activation="relu"),  # type: ignore[attr-defined]
-            tf.keras.layers.Dropout(0.3),  # type: ignore[attr-defined]
-            tf.keras.layers.Dense(32, activation="relu"),  # type: ignore[attr-defined]
-            tf.keras.layers.Dropout(0.2),  # type: ignore[attr-defined]
-            tf.keras.layers.Dense(16, activation="relu"),  # type: ignore[attr-defined]
-            tf.keras.layers.Dense(1, activation="sigmoid"),  # type: ignore[attr-defined]
-        ]
-    )
+    # Guardar DataFrame como CSV
+    df.to_csv(ruta_archivo, index=False, encoding="utf-8")
 
-    modelo_nn.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),  # type: ignore[attr-defined]
-        loss="binary_crossentropy",
-        metrics=["accuracy"],
-    )
-
-    # Entrenar
-    modelo_nn.fit(
-        X_train_scaled,
-        y_train,
-        epochs=50,
-        batch_size=32,
-        validation_split=0.2,
-        verbose=0,
-    )
-
-    # Predicciones
-    y_train_pred_proba_nn = modelo_nn.predict(X_train_scaled, verbose=0)
-    y_test_pred_proba_nn = modelo_nn.predict(X_test_scaled, verbose=0)
-
-    # Métricas
-    metricas_train_nn = calcular_metricas_modelo(
-        np.array(y_train), np.array(y_train_pred_proba_nn)
-    )
-    metricas_test_nn = calcular_metricas_modelo(
-        np.array(y_test), np.array(y_test_pred_proba_nn)
-    )
-
-    tiempo_nn = time.time() - inicio_nn
-
-    resultado_nn = ResultadoEntrenamiento(
-        modelo="Red Neuronal (TensorFlow)",
-        total_registros=len(df),
-        registros_train=len(X_train),
-        registros_test=len(X_test),
-        features_utilizadas=features_finales,
-        metricas_train=metricas_train_nn,
-        metricas_test=metricas_test_nn,
-        tiempo_entrenamiento_segundos=round(tiempo_nn, 2),
-        arquitectura={
-            "tipo": "Sequential Neural Network",
-            "capas": [
-                {"tipo": "Dense", "neuronas": 64, "activacion": "relu"},
-                {"tipo": "Dropout", "rate": 0.3},
-                {"tipo": "Dense", "neuronas": 32, "activacion": "relu"},
-                {"tipo": "Dropout", "rate": 0.2},
-                {"tipo": "Dense", "neuronas": 16, "activacion": "relu"},
-                {"tipo": "Dense", "neuronas": 1, "activacion": "sigmoid"},
-            ],
-            "optimizer": "Adam (lr=0.001)",
-            "loss": "binary_crossentropy",
-            "epochs": 50,
-            "batch_size": 32,
-        },
-        resumen=f"Accuracy test: {metricas_test_nn.accuracy:.2%}, F1: {metricas_test_nn.f1_score:.4f}, AUC: {metricas_test_nn.auc:.4f}",
-    )
-
-    # ===========================================================================
-    # 4. ENTRENAR RANDOM FOREST
-    # ===========================================================================
-    inicio_rf = time.time()
-
-    # Random Forest no requiere normalización
-    modelo_rf = RandomForestClassifier(
-        n_estimators=100,
-        max_depth=10,
-        min_samples_split=5,
-        min_samples_leaf=2,
-        random_state=42,
-        n_jobs=-1,
-    )
-
-    # Entrenar
-    modelo_rf.fit(X_train, y_train)
-
-    # Predicciones
-    y_train_pred_proba_rf = modelo_rf.predict_proba(X_train)[:, 1]  # type: ignore[call-overload]
-    y_test_pred_proba_rf = modelo_rf.predict_proba(X_test)[:, 1]  # type: ignore[call-overload]
-
-    # Métricas
-    metricas_train_rf = calcular_metricas_modelo(
-        np.array(y_train), np.array(y_train_pred_proba_rf)
-    )
-    metricas_test_rf = calcular_metricas_modelo(
-        np.array(y_test), np.array(y_test_pred_proba_rf)
-    )
-
-    tiempo_rf = time.time() - inicio_rf
-
-    # Importancia de features
-    feature_importance = dict(
-        zip(
-            features_finales,
-            [round(float(x), 4) for x in modelo_rf.feature_importances_],
-        )
-    )
-
-    resultado_rf = ResultadoEntrenamiento(
-        modelo="Random Forest (scikit-learn)",
-        total_registros=len(df),
-        registros_train=len(X_train),
-        registros_test=len(X_test),
-        features_utilizadas=features_finales,
-        metricas_train=metricas_train_rf,
-        metricas_test=metricas_test_rf,
-        tiempo_entrenamiento_segundos=round(tiempo_rf, 2),
-        arquitectura={
-            "tipo": "Random Forest Classifier",
-            "n_estimators": 100,
-            "max_depth": 10,
-            "min_samples_split": 5,
-            "min_samples_leaf": 2,
-            "criterion": "gini",
-            "feature_importance": feature_importance,
-        },
-        resumen=f"Accuracy test: {metricas_test_rf.accuracy:.2%}, F1: {metricas_test_rf.f1_score:.4f}, AUC: {metricas_test_rf.auc:.4f}",
-    )
-
-    # ===========================================================================
-    # 5. COMPARACIÓN DE MODELOS (Punto d)
-    # ===========================================================================
-
-    # Determinar mejor modelo por desempeño
-    if metricas_test_rf.f1_score > metricas_test_nn.f1_score:
-        mejor_modelo = "Random Forest"
-        diferencia_f1 = metricas_test_rf.f1_score - metricas_test_nn.f1_score
-        razon_desempeno = (
-            f"Random Forest supera a la Red Neuronal en F1-Score por {diferencia_f1:.4f} puntos. "
-            f"También tiene mejor Accuracy ({metricas_test_rf.accuracy:.2%} vs {metricas_test_nn.accuracy:.2%}) "
-            f"y AUC ({metricas_test_rf.auc:.4f} vs {metricas_test_nn.auc:.4f}). "
-            "Random Forest es más robusto con datasets pequeños y no requiere tunning extenso de hiperparámetros."
-        )
-    else:
-        mejor_modelo = "Red Neuronal"
-        diferencia_f1 = metricas_test_nn.f1_score - metricas_test_rf.f1_score
-        razon_desempeno = (
-            f"Red Neuronal supera a Random Forest en F1-Score por {diferencia_f1:.4f} puntos. "
-            f"También tiene mejor Accuracy ({metricas_test_nn.accuracy:.2%} vs {metricas_test_rf.accuracy:.2%}) "
-            f"y AUC ({metricas_test_nn.auc:.4f} vs {metricas_test_rf.auc:.4f}). "
-            "Las redes neuronales pueden capturar relaciones no lineales complejas mejor que los árboles."
-        )
-
-    # Modelo más fácil de desplegar
-    modelo_mas_facil = "Random Forest"
-    razon_facilidad = (
-        "Random Forest es significativamente más fácil de desplegar porque: "
-        "(1) No requiere GPU ni TensorFlow en producción, "
-        "(2) El modelo se serializa fácilmente con pickle/joblib, "
-        "(3) Predicciones instantáneas sin carga de modelo pesado, "
-        "(4) Menor consumo de memoria y CPU, "
-        f"(5) Tiempo de entrenamiento mucho menor ({tiempo_rf:.2f}s vs {tiempo_nn:.2f}s), "
-        "(6) No requiere normalización de datos en producción, "
-        "(7) Más interpretable con feature importance."
-    )
-
-    # Diferencias clave
-    diferencias = [
-        f"Tiempo de entrenamiento: RF {tiempo_rf:.2f}s vs NN {tiempo_nn:.2f}s",
-        f"Accuracy: RF {metricas_test_rf.accuracy:.4f} vs NN {metricas_test_nn.accuracy:.4f}",
-        f"F1-Score: RF {metricas_test_rf.f1_score:.4f} vs NN {metricas_test_nn.f1_score:.4f}",
-        f"AUC: RF {metricas_test_rf.auc:.4f} vs NN {metricas_test_nn.auc:.4f}",
-        "RF no requiere normalización de features, NN sí",
-        "RF proporciona feature importance automáticamente",
-        "NN requiere TensorFlow/GPU para entrenamiento óptimo",
-        "RF más interpretable y explicable para stakeholders",
-    ]
-
-    # Recomendación final
-    recomendacion = (
-        f"**Recomendación**: Usar {mejor_modelo if mejor_modelo == 'Random Forest' else 'Random Forest'} para producción. "
-        "Aunque el desempeño puede ser similar, Random Forest ofrece: "
-        "(1) Despliegue más simple y robusto, "
-        "(2) Menor latencia en predicciones, "
-        "(3) No requiere infraestructura especializada, "
-        "(4) Mayor interpretabilidad con feature importance, "
-        "(5) Mantenimiento más sencillo. "
-        f"Con {metricas_test_rf.accuracy:.2%} de accuracy y {metricas_test_rf.f1_score:.4f} de F1-Score, "
-        "Random Forest cumple con los requisitos de precisión mientras minimiza la complejidad operacional."
-    )
-
-    comparacion = ComparacionModelos(
-        mejor_modelo=mejor_modelo,
-        razon_mejor_desempeno=razon_desempeno,
-        modelo_mas_facil_desplegar=modelo_mas_facil,
-        razon_facilidad_despliegue=razon_facilidad,
-        diferencias_clave=diferencias,
-        recomendacion_final=recomendacion,
-    )
-
-    # ===========================================================================
-    # 6. GUARDAR MODELO CON VERSIONADO
-    # ===========================================================================
-    import pickle
-    from pathlib import Path
-
-    models_dir = Path("models")
-    models_dir.mkdir(exist_ok=True)
-
-    # Generate version based on timestamp
-    version = datetime.now().strftime("%Y%m%d_%H%M%S")
-    version_short = datetime.now().strftime("v%Y%m%d")
-
-    # Save Random Forest model (recommended for production)
-    modelo_filename = models_dir / f"modelo_rf_{version}.pkl"
-    with open(modelo_filename, "wb") as f:
-        pickle.dump(modelo_rf, f)
-
-    # Save feature names
-    feature_names_file = models_dir / f"feature_names_{version}.pkl"
-    with open(feature_names_file, "wb") as f:
-        pickle.dump(features_finales, f)
-
-    # Save label encoders
-    encoders_file = models_dir / f"label_encoders_{version}.pkl"
-    with open(encoders_file, "wb") as f:
-        pickle.dump(label_encoders, f)
-
-    # Save model metadata
-    metadata = {
-        "version": version,
-        "version_short": version_short,
-        "model_type": "RandomForestClassifier",
-        "features": features_finales,
-        "metrics": {
-            "train": {
-                "accuracy": metricas_train_rf.accuracy,
-                "precision": metricas_train_rf.precision,
-                "recall": metricas_train_rf.recall,
-                "f1_score": metricas_train_rf.f1_score,
-                "auc": metricas_train_rf.auc,
-            },
-            "test": {
-                "accuracy": metricas_test_rf.accuracy,
-                "precision": metricas_test_rf.precision,
-                "recall": metricas_test_rf.recall,
-                "f1_score": metricas_test_rf.f1_score,
-                "auc": metricas_test_rf.auc,
-            },
-        },
-        "training_info": {
-            "total_records": len(df),
-            "train_records": len(X_train),
-            "test_records": len(X_test),
-            "training_time_seconds": tiempo_rf,
-        },
-        "created_at": datetime.now().isoformat(),
-    }
-
-    metadata_file = models_dir / f"metadata_{version}.json"
-    import json
-
-    with open(metadata_file, "w") as f:
-        json.dump(metadata, f, indent=2)
-
-    # Also create a symlink or copy to latest for backward compatibility
-    latest_model = models_dir / "modelo_rf_latest.pkl"
-    import shutil
-
-    shutil.copy(modelo_filename, latest_model)
-
-    logger = get_logger(__name__)
     logger.info(
-        f"Model saved successfully. Version: {version}, "
-        f"File: {modelo_filename}, Metrics: {metricas_test_rf.f1_score:.4f} F1"
+        f"Dataset consolidado guardado exitosamente: {ruta_archivo} "
+        f"({len(df)} registros, {len(df.columns)} columnas)"
     )
 
-    return ResultadoCompletoModelos(
-        red_neuronal=resultado_nn,
-        random_forest=resultado_rf,
-        comparacion=comparacion,
-    )
+    # Retornar ruta relativa desde la raíz del workspace
+    ruta_relativa = f"./data/{nombre_archivo}"
 
-
-async def entrenar_modelo_neural_network(session: Session) -> ResultadoEntrenamiento:
-    """
-    Train a neural network model using TensorFlow for adherencia prediction
-
-    Args:
-        session: Database session
-
-    Returns:
-        ResultadoEntrenamiento with training metrics and model info
-    """
-    import time
-
-    import tensorflow as tf
-    from sklearn.metrics import (
-        accuracy_score,
-        auc,
-        f1_score,
-        precision_score,
-        recall_score,
-        roc_curve,
-    )
-    from sklearn.model_selection import train_test_split
-    from sklearn.preprocessing import LabelEncoder, StandardScaler
-
-    inicio = time.time()
-
-    # ===========================================================================
-    # 1. OBTENER DATASET
-    # ===========================================================================
-    dataset_list = await generar_dataset_modelado(session)
-    df = pd.DataFrame([d.model_dump() for d in dataset_list])
-
-    if len(df) < 10:
-        raise ValueError("Dataset muy pequeño para entrenar (mínimo 10 registros)")
-
-    # ===========================================================================
-    # 2. PREPARACIÓN DE FEATURES
-    # ===========================================================================
-
-    # Features seleccionadas según requerimientos
-    features_numericas = [
-        "edad",
-        "count_consultas",
-        "count_laboratorios",
-        "avg_resultado_numerico",
-        "avg_biopsia",
-        "avg_vpH",
-        "avg_marcador_ca125",
-        "avg_psa",
-        "avg_colonoscopia",
-    ]
-
-    features_categoricas = ["zona_residencia", "tipo_cancer"]
-
-    # Codificar variables categóricas
-    label_encoders = {}
-    df_encoded = df.copy()
-
-    for col in features_categoricas:
-        le = LabelEncoder()
-        df_encoded[f"{col}_encoded"] = le.fit_transform(df_encoded[col])
-        label_encoders[col] = le
-
-    # Lista final de features
-    features_finales = features_numericas + [
-        f"{col}_encoded" for col in features_categoricas
-    ]
-
-    # Preparar X e y
-    X = df_encoded[features_finales].values
-    y = df_encoded["adherencia_12m"].values
-
-    # ===========================================================================
-    # 3. DIVISIÓN TRAIN/TEST
-    # ===========================================================================
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
-
-    # Normalización
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-
-    # ===========================================================================
-    # 4. CONSTRUCCIÓN DE RED NEURONAL
-    # ===========================================================================
-    modelo_nn = tf.keras.Sequential(  # type: ignore[attr-defined]
-        [
-            tf.keras.layers.Input(shape=(len(features_finales),)),  # type: ignore[attr-defined]
-            tf.keras.layers.Dense(64, activation="relu"),  # type: ignore[attr-defined]
-            tf.keras.layers.Dropout(0.3),  # type: ignore[attr-defined]
-            tf.keras.layers.Dense(32, activation="relu"),  # type: ignore[attr-defined]
-            tf.keras.layers.Dropout(0.2),  # type: ignore[attr-defined]
-            tf.keras.layers.Dense(16, activation="relu"),  # type: ignore[attr-defined]
-            tf.keras.layers.Dense(1, activation="sigmoid"),  # type: ignore[attr-defined]
-        ]
-    )
-
-    modelo_nn.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),  # type: ignore[attr-defined]
-        loss="binary_crossentropy",
-        metrics=["accuracy"],
-    )
-
-    # ===========================================================================
-    # 5. ENTRENAMIENTO
-    # ===========================================================================
-    modelo_nn.fit(
-        X_train_scaled,
-        y_train,
-        epochs=50,
-        batch_size=32,
-        validation_split=0.2,
-        verbose=0,
-    )
-
-    # ===========================================================================
-    # 6. PREDICCIONES Y EVALUACIÓN
-    # ===========================================================================
-
-    def calcular_metricas(
-        y_true: np.ndarray, y_pred_proba: np.ndarray
-    ) -> MetricasModelo:
-        """Calcular métricas de evaluación"""
-        y_pred = (y_pred_proba > 0.5).astype(int).flatten()
-
-        acc = accuracy_score(y_true, y_pred)
-        prec = precision_score(y_true, y_pred, zero_division=0.0)  # type: ignore[arg-type]
-        rec = recall_score(y_true, y_pred, zero_division=0.0)  # type: ignore[arg-type]
-        f1 = f1_score(y_true, y_pred, zero_division=0.0)  # type: ignore[arg-type]
-
-        # Calcular AUC
-        try:
-            fpr, tpr, _ = roc_curve(y_true, y_pred_proba)
-            auc_score = auc(fpr, tpr)
-        except Exception:
-            auc_score = 0.0
-
-        return MetricasModelo(
-            accuracy=round(float(acc), 4),
-            precision=round(float(prec), 4),
-            recall=round(float(rec), 4),
-            f1_score=round(float(f1), 4),
-            auc=round(float(auc_score), 4),
-        )
-
-    # Predicciones
-    y_train_pred_proba = modelo_nn.predict(X_train_scaled, verbose=0)
-    y_test_pred_proba = modelo_nn.predict(X_test_scaled, verbose=0)
-
-    # Calcular métricas
-    metricas_train = calcular_metricas(np.array(y_train), np.array(y_train_pred_proba))
-    metricas_test = calcular_metricas(np.array(y_test), np.array(y_test_pred_proba))
-
-    # ===========================================================================
-    # 7. RESUMEN Y RESULTADO
-    # ===========================================================================
-    tiempo_total = time.time() - inicio
-
-    # Información de arquitectura
-    arquitectura = {
-        "tipo": "Sequential Neural Network",
-        "capas": [
-            {"tipo": "Dense", "neuronas": 64, "activacion": "relu"},
-            {"tipo": "Dropout", "rate": 0.3},
-            {"tipo": "Dense", "neuronas": 32, "activacion": "relu"},
-            {"tipo": "Dropout", "rate": 0.2},
-            {"tipo": "Dense", "neuronas": 16, "activacion": "relu"},
-            {"tipo": "Dense", "neuronas": 1, "activacion": "sigmoid"},
-        ],
-        "optimizer": "Adam (lr=0.001)",
-        "loss": "binary_crossentropy",
-        "epochs": 50,
-        "batch_size": 32,
-    }
-
-    # Generar resumen
-    resumen = (
-        f"Modelo de Red Neuronal entrenado exitosamente. "
-        f"Accuracy en test: {metricas_test.accuracy:.2%}, "
-        f"F1-Score en test: {metricas_test.f1_score:.4f}, "
-        f"AUC en test: {metricas_test.auc:.4f}"
-    )
-
-    return ResultadoEntrenamiento(
-        modelo="Red Neuronal (TensorFlow)",
+    return RutaDataset(
+        ruta_archivo=ruta_relativa,
         total_registros=len(df),
-        registros_train=len(X_train),
-        registros_test=len(X_test),
-        features_utilizadas=features_finales,
-        metricas_train=metricas_train,
-        metricas_test=metricas_test,
-        tiempo_entrenamiento_segundos=round(tiempo_total, 2),
-        arquitectura=arquitectura,
-        resumen=resumen,
+        descripcion=(
+            f"Dataset consolidado con {len(df)} pacientes. "
+            f"Incluye: datos demográficos, clínicos, conteos de consultas/laboratorios, "
+            f"y promedios de resultados por tipo de prueba. "
+            f"Listo para modelado de Machine Learning."
+        ),
     )

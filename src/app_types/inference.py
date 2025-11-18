@@ -1,15 +1,32 @@
 """
 Pydantic types for inference endpoints
 """
+
+from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field
+
+
+class TipoModelo(str, Enum):
+    """
+    Tipos de modelo disponibles para entrenamiento
+    """
+
+    XGBOOST = "xgboost"
+    NEURAL_NETWORK = "neural_network"
 
 
 class PredictionRequest(BaseModel):
     """
     Request model for prediction endpoint
     """
+
+    # Tipo de modelo a utilizar
+    tipo_modelo: TipoModelo = Field(
+        ...,
+        description="Tipo de modelo a usar: 'xgboost' o 'neural_network'",
+    )
 
     # Demographic variables
     sexo: str = Field(..., description="Sexo del paciente")
@@ -47,30 +64,33 @@ class PredictionRequest(BaseModel):
         ge=0.0,
         description="Promedio de marcador CA125",
     )
-    avg_psa: float = Field(
-        default=0.0, ge=0.0, description="Promedio de PSA"
-    )
+    avg_psa: float = Field(default=0.0, ge=0.0, description="Promedio de PSA")
     avg_colonoscopia: float = Field(
         default=0.0, ge=0.0, description="Promedio de colonoscopias"
     )
 
-    model_config = {"json_schema_extra": {"example": {
-        "sexo": "Femenino",
-        "edad": 55,
-        "zona_residencia": "Urbana",
-        "tipo_cancer": "Mama",
-        "estadio": "Ii",
-        "aseguradora": "Sura",
-        "count_consultas": 12,
-        "dias_desde_diagnostico": 365,
-        "count_laboratorios": 8,
-        "avg_resultado_numerico": 2.5,
-        "avg_biopsia": 0.0,
-        "avg_vpH": 0.0,
-        "avg_marcador_ca125": 45.3,
-        "avg_psa": 0.0,
-        "avg_colonoscopia": 0.0,
-    }}}
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "tipo_modelo": "xgboost",
+                "sexo": "Femenino",
+                "edad": 55,
+                "zona_residencia": "Urbana",
+                "tipo_cancer": "Mama",
+                "estadio": "Ii",
+                "aseguradora": "Sura",
+                "count_consultas": 12,
+                "dias_desde_diagnostico": 365,
+                "count_laboratorios": 8,
+                "avg_resultado_numerico": 2.5,
+                "avg_biopsia": 0.0,
+                "avg_vpH": 0.0,
+                "avg_marcador_ca125": 45.3,
+                "avg_psa": 0.0,
+                "avg_colonoscopia": 0.0,
+            }
+        }
+    }
 
 
 class PredictionResponse(BaseModel):
@@ -89,7 +109,22 @@ class PredictionResponse(BaseModel):
     )
     model_version: str = Field(..., description="Versión del modelo utilizado")
     model_name: str = Field(..., description="Nombre del modelo")
-    inference_time_ms: float = Field(..., description="Tiempo de inferencia en milisegundos")
+    inference_time_ms: float = Field(
+        ..., description="Tiempo de inferencia en milisegundos"
+    )
+
+
+class TrainingRequest(BaseModel):
+    """
+    Request model for training endpoint
+    """
+
+    tipo_modelo: TipoModelo = Field(
+        ...,
+        description="Tipo de modelo a entrenar: 'xgboost' o 'neural_network'",
+    )
+
+    model_config = {"json_schema_extra": {"example": {"tipo_modelo": "xgboost"}}}
 
 
 class ModelInfo(BaseModel):
@@ -103,4 +138,3 @@ class ModelInfo(BaseModel):
     features: list[str]
     loaded_at: str
     model_path: Optional[str] = None
-
