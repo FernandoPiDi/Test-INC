@@ -1,23 +1,177 @@
 # API de Predicción de Adherencia de Pacientes Oncológicos
 
-[![CI/CD Pipeline](https://github.com/USUARIO/REPO/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/USUARIO/REPO/actions/workflows/ci-cd.yml)
-[![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/USUARIO/REPO/pkgs/container/REPO)
-[![Python](https://img.shields.io/badge/python-3.13-blue)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green)](https://fastapi.tiangolo.com/)
-
 ## 📋 Descripción del Proyecto
 
-API desarrollada con FastAPI para predecir la adherencia a tratamientos de pacientes oncológicos utilizando Machine Learning. El sistema procesa datos de consultas médicas y resultados de laboratorio para generar predicciones mediante modelos de XGBoost y Redes Neuronales.
+API desarrollada con FastAPI para predecir la adherencia a tratamientos de pacientes oncológicos utilizando Machine Learning. El sistema procesa los datos de consultas médicas y resultados de laboratorio para generar predicciones mediante modelos de XGBoost y Redes Neuronales.
 
 ---
 
-## 🎯 Solución a la Prueba Técnica
+## 🚀 Instalación y Configuración
+
+### Opción 1: Docker (Recomendado)
+
+#### 1. Crear archivo `.env`
+
+```bash
+DB_USERNAME=postgres
+DB_PASSWORD=postgres123
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=adherencia_db
+```
+
+#### 2. Iniciar servicios
+
+```bash
+# Construir y levantar contenedores
+docker-compose up --build
+
+# En modo background
+docker-compose up -d --build
+```
+
+**¿Qué hace Docker Compose?**
+
+1. ✅ Inicia PostgreSQL con la base de datos
+2. ✅ Espera a que PostgreSQL esté listo (health check)
+3. ✅ Ejecuta migraciones de Alembic automáticamente
+4. ✅ Inicia la API en el puerto 8000
+
+La API estará disponible en: <http://localhost:8000>
+
+### Opción 2: Instalación Local
+
+#### 1. Instalar dependencias
+
+```bash
+# Usando uv (recomendado)
+pip install uv
+uv pip install -r pyproject.toml
+
+# O usando pip directamente
+pip install -e .
+```
+
+#### 2. Configurar base de datos
+
+Editar `.env` con las credenciales de PostgreSQL local.
+
+#### 3. Ejecutar migraciones
+
+```bash
+alembic upgrade head
+```
+
+#### 4. Iniciar la API
+
+```bash
+python -m uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+---
+
+## Flujo de Trabajo Completo
+
+Para resolver la prueba técnica, sigue este flujo **en orden**:
+
+### **Cargar Datos Iniciales** (Si la BD está vacía)
+
+```bash
+# Subir archivo Excel con datos
+curl -X POST "http://localhost:8000/laboratorio/datos" \
+     -F "file=@./data/Dataset_prueba.xlsx"
+```
+
+**Resultado esperado:** ✓ 80 pacientes, 596 consultas, 430 laboratorios
+
+### **Procesar y Limpiar Datos**
+
+```bash
+# Limpiar, normalizar e imputar valores faltantes
+curl -X PUT "http://localhost:8000/laboratorio/procesamiento/limpieza"
+```
+
+**¿Por qué es crítico?**
+
+- Imputa ~228 registros con NaN en `resultado_numerico` (53% de los datos)
+- Normaliza variables categóricas
+- Corrige outliers en datos numéricos
+- **Garantiza dataset 100% limpio para ML**
+
+**Resultado esperado:** ✓ Reporte con imputaciones realizadas
+
+### **Generar Dataset para Modelado**
+
+```bash
+# Crear dataset optimizado para ML (usa datos limpios de paso 1)
+curl -X GET "http://localhost:8000/laboratorio/dataset/modelado"
+```
+
+**Resultado esperado:** ✓ CSV sin valores vacíos en `./data/dataset_modelado_YYYYMMDD_HHMMSS.csv`
+
+### **Entrenar Modelos**
+
+```bash
+# Entrenar XGBoost
+curl -X POST "http://localhost:8000/laboratorio/modelado/entrenar" \
+     -H "Content-Type: application/json" \
+     -d '{"tipo_modelo": "xgboost"}'
+
+# Entrenar Red Neuronal
+curl -X POST "http://localhost:8000/laboratorio/modelado/entrenar" \
+     -H "Content-Type: application/json" \
+     -d '{"tipo_modelo": "neural_network"}'
+```
+
+### **Realizar Predicciones**
+
+```bash
+# Predecir adherencia de un paciente con XGBoost
+curl -X POST "http://localhost:8000/laboratorio/predecir" \
+     -H "Content-Type: application/json" \
+     -d '{
+  "tipo_modelo": "xgboost",
+  "sexo": "Femenino",
+  "edad": 55,
+  "zona_residencia": "Urbana",
+  "tipo_cancer": "Mama",
+  "estadio": "Ii",
+  "aseguradora": "Sura",
+  "count_consultas": 12,
+  "dias_desde_diagnostico": 365,
+  "count_laboratorios": 8,
+  "avg_resultado_numerico": 2.5,
+  "avg_biopsia": 0.0,
+  "avg_vpH": 0.0,
+  "avg_marcador_ca125": 45.3,
+  "avg_psa": 0.0,
+  "avg_colonoscopia": 0.0
+}'
+```
+
+**Resultado esperado:**
+
+```json
+{
+  "prediction": 1,
+  "probability": 0.6094,
+  "model_version": "xgboost_20251118_000450",
+  "model_name": "xgboost",
+  "inference_time_ms": 5.44
+}
+```
+
+**Nota:** Cambia `"tipo_modelo"` a `"neural_network"` para usar el modelo de red neuronal.
+
+---
+
+## Solución a la Prueba Técnica
 
 Este proyecto resuelve los siguientes requerimientos del examen técnico:
 
 ### **Parte 1: Ingeniería de Datos**
 
-#### **a) Bases de datos: Consulta de información consolidada por paciente**
+#### **a) Bases de datos:**
 
 **Endpoint:** `GET /laboratorio/dataset`
 
@@ -48,15 +202,15 @@ curl -X PUT "http://localhost:8000/laboratorio/procesamiento/limpieza" \
 
 **Descripción:** Ejecuta un pipeline de limpieza que incluye:
 
-- ✅ Normalización de texto (minúsculas, eliminación de tildes)
-- ✅ Estandarización de valores categóricos
-- ✅ Corrección de outliers en resultados numéricos mediante Winsorización (IQR)
-- ✅ **Imputación inteligente de valores faltantes:**
+- Normalización de texto (minúsculas, eliminación de tildes)
+- Estandarización de valores categóricos
+- Corrección de outliers en resultados numéricos mediante Winsorización (IQR)
+- **Imputación inteligente de valores faltantes:**
   - Columnas con < 5% faltantes: Valores por defecto o mediana/moda
   - Columnas con 5-20% faltantes: Mediana (numéricos) o moda (categóricos)
   - Columnas con > 20% faltantes: Imputación con 0 para columnas numéricas
-- ✅ Validación de tipos de datos
-- ✅ **Garantía de datos sin NaN** - Los valores nulos se imputan directamente en la base de datos
+- Validación de tipos de datos
+- **Garantía de datos sin NaN** - Los valores nulos se imputan directamente en la base de datos
 
 **Respuesta:** Reporte detallado con:
 
@@ -66,7 +220,7 @@ curl -X PUT "http://localhost:8000/laboratorio/procesamiento/limpieza" \
 - Outliers detectados y corregidos
 - Tiempo de procesamiento
 
-**⚠️ Importante:** Este endpoint debe ejecutarse **antes** de generar el dataset de modelado para garantizar que los datos estén completamente limpios.
+**Importante:** Este endpoint debe ejecutarse **antes** de generar el dataset de modelado para garantizar que los datos estén completamente limpios.
 
 ---
 
@@ -81,12 +235,11 @@ curl -X GET "http://localhost:8000/laboratorio/dataset/modelado" \
 
 **Descripción:** Genera un dataset optimizado para Machine Learning:
 
-- ✅ Una fila por paciente
-- ✅ Todas las variables agregadas (conteos, promedios por tipo de prueba)
-- ✅ **Sin valores nulos** - Datos completamente limpios desde la base de datos
-- ✅ Tipos de datos correctos (numéricos como float, categóricos como string)
-- ✅ Guardado como CSV con timestamp en `./data/dataset_modelado_YYYYMMDD_HHMMSS.csv`
-- ✅ **Manejo robusto de NaN** - Valores `nan` de SQL se convierten automáticamente a 0.0
+- Una fila por paciente
+- Todas las variables agregadas (conteos, promedios por tipo de prueba)
+- **Sin valores nulos** - Datos completamente limpios desde la base de datos
+- Guardado como CSV con timestamp en `./data/dataset_modelado_YYYYMMDD_HHMMSS.csv`
+- **Manejo robusto de NaN** - Valores `nan` de SQL se convierten automáticamente a 0.0
 
 **Flujo recomendado:**
 
@@ -225,9 +378,6 @@ curl -X POST "http://localhost:8000/laboratorio/predecir" \
 #### **c) Evaluación con métricas técnicas**
 
 Las métricas de **accuracy, precision, recall, F1-Score y AUC** se calculan automáticamente durante el entrenamiento y se retornan en la respuesta del endpoint `POST /laboratorio/modelado/entrenar`. Cada modelo incluye métricas tanto para el conjunto de entrenamiento (`metricas_train`) como para el conjunto de test (`metricas_test`).
-
-**Ver sección (d) Comparación de Modelos** más abajo para los resultados completos.
-
 ---
 
 #### **d) Comparación de Modelos**
@@ -311,187 +461,226 @@ curl -X GET "http://localhost:8000/laboratorio/analisis/paciente/PAC001" \
 
 **Descripción:** Análisis detallado de resultados de laboratorio de un paciente específico.
 
----
+### **Parte 4: Despliegue y Arquitectura**
 
-## 🔄 CI/CD Pipeline
+#### **a) Arquitectura de la API de predicción**
 
-Pipeline automatizado con GitHub Actions:
+La arquitectura implementada sigue una estructura modular con separación clara de responsabilidades:
 
-- ✅ **Ruff**: Validación de código
-- ✅ **Pyright**: Type checking
-- 🐳 **Docker Build**: Construcción automática
-- 📦 **Registry**: Publicación en ghcr.io
+**i. Almacenamiento:**
+**PostgreSQL 17**: Base de datos relacional con esquema definido por SQLModel
+**Volúmenes persistentes**: Datos de PostgreSQL y modelos ML guardados en contenedores
+**Estructura de tablas**: `paciente`, `consulta`, `laboratorio` con relaciones normalizadas
 
-### Pull de la imagen
+**ii. Pipeline ETL:**
+**Carga**: Endpoint `POST /laboratorio/datos` para subir archivos Excel
+**Transformación**: Endpoint `PUT /laboratorio/procesamiento/limpieza` ejecuta limpieza automática
+**Validación**: Tipos de datos, normalización categórica, imputación de valores faltantes
+**Salida**: Dataset limpio generado automáticamente en `./data/`
 
-```bash
-docker pull ghcr.io/TU_USUARIO/test-inc:latest
+**iii. Entrenamiento:**
+**Endpoint**: `POST /laboratorio/modelado/entrenar` con parámetro `tipo_modelo`
+**Modelos**: XGBoost (recomendado) y Red Neuronal TensorFlow
+**Guardado**: Modelos serializados en `./models/` con timestamp y metadata
+**Métricas**: Accuracy, Precision, Recall, F1-Score, AUC calculadas automáticamente
+
+**iv. Endpoint para inferencia:**
+**Endpoint**: `POST /laboratorio/predecir` con features del paciente
+**Procesamiento**: Codificación automática de variables categóricas
+**Respuesta**: Predicción binaria (0/1), probabilidad y tiempo de inferencia
+**Versionado**: Cada modelo incluye timestamp y versión en metadata
+
+**v. Monitoreo:**
+**Health checks**: Endpoint `/health` con verificación de conectividad
+**Métricas de predicción**: Tiempo de respuesta, estado éxito/error
+**Logs estructurados**: Archivo `logs/app.log` con niveles DEBUG/INFO
+**Docker health checks**: Verificación automática de servicios
+
+**vi. Logs:**
+**Consola**: Nivel INFO para operaciones normales
+**Archivo**: Nivel DEBUG con rotación automática
+**Estructura**: JSON con campos timestamp, level, message, request_id
+**Monitoreo de predicciones**: Cada inferencia se registra automáticamente
+
+#### **b) Dockerfile para empaquetar el modelo**
+
+```dockerfile
+FROM python:3.13-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/src \
+    PYTHONHASHSEED=random
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    libpq5 postgresql-client curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -u 1000 appuser && \
+    mkdir -p /app /app/models /app/logs /app/data && \
+    chown -R appuser:appuser /app
+
+WORKDIR /app
+
+COPY --chown=appuser:appuser pyproject.toml ./
+RUN pip install --no-cache-dir uv
+RUN uv pip install --system --no-cache -r pyproject.toml
+
+COPY --chown=appuser:appuser src/ ./src/
+COPY --chown=appuser:appuser alembic/ ./alembic/
+COPY --chown=appuser:appuser alembic.ini ./
+COPY --chown=appuser:appuser entrypoint.sh ./
+
+RUN chmod +x /app/entrypoint.sh
+RUN mkdir -p /app/models /app/logs /app/data && \
+    chown -R appuser:appuser /app
+
+USER appuser
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)" || exit 1
+
+ENTRYPOINT ["/app/entrypoint.sh"]
 ```
 
----
+#### **c) Supervisión, actualización y CI/CD**
 
-## 🚀 Instalación y Configuración
+**Supervisión del desempeño del modelo:**
+**Métricas automáticas**: Accuracy, F1-Score calculadas en cada predicción vs conjunto de test
+**Drift detection**: Monitoreo de distribución de features de entrada
+**Alertas**: Umbrales configurables para degradación de performance
+**Logging de predicciones**: Cada inferencia se registra con resultado y confianza
 
-### Opción 1: Docker (Recomendado)
+**Actualización del modelo:**
+**Pipeline automatizado**: Workflow GitHub Actions ejecuta re-entrenamiento semanal
+**Validación A/B**: Comparación de versiones nuevas vs producción antes de deploy
+**Rollback automático**: Si nueva versión tiene performance < 95% de la actual
+**Notificación**: Alertas Slack/email cuando se actualiza modelo en producción
 
-#### 1. Crear archivo `.env`
-
-```bash
-DB_USERNAME=postgres
-DB_PASSWORD=postgres123
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=adherencia_db
-```
-
-#### 2. Iniciar servicios
-
-```bash
-# Construir y levantar contenedores
-docker-compose up --build
-
-# En modo background
-docker-compose up -d --build
-```
-
-**¿Qué hace Docker Compose?**
-
-1. ✅ Inicia PostgreSQL con la base de datos
-2. ✅ Espera a que PostgreSQL esté listo (health check)
-3. ✅ Ejecuta migraciones de Alembic automáticamente
-4. ✅ Inicia la API en el puerto 8000
-
-La API estará disponible en: <http://localhost:8000>
-
----
-
-### Opción 2: Instalación Local
-
-#### 1. Instalar dependencias
-
-```bash
-# Usando uv (recomendado)
-pip install uv
-uv pip install -r pyproject.toml
-
-# O usando pip directamente
-pip install -e .
-```
-
-#### 2. Configurar base de datos
-
-Editar `.env` con las credenciales de PostgreSQL local.
-
-#### 3. Ejecutar migraciones
-
-```bash
-alembic upgrade head
-```
-
-#### 4. Iniciar la API
-
-```bash
-python -m uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
----
-
-## 📊 Flujo de Trabajo Completo
-
-Para resolver la prueba técnica, sigue este flujo **en orden**:
-
-### 0️⃣ **Cargar Datos Iniciales** (Si la BD está vacía)
-
-```bash
-# Subir archivo Excel con datos
-curl -X POST "http://localhost:8000/laboratorio/datos" \
-     -F "file=@./data/Dataset_prueba.xlsx"
-```
-
-**Resultado esperado:** ✓ 80 pacientes, 596 consultas, 430 laboratorios
-
-### 1️⃣ **Procesar y Limpiar Datos** ⚠️ CRÍTICO
-
-```bash
-# Limpiar, normalizar e imputar valores faltantes
-curl -X PUT "http://localhost:8000/laboratorio/procesamiento/limpieza"
-```
-
-**¿Por qué es crítico?**
-
-- Imputa ~228 registros con NaN en `resultado_numerico` (53% de los datos)
-- Normaliza variables categóricas
-- Corrige outliers en datos numéricos
-- **Garantiza dataset 100% limpio para ML**
-
-**Resultado esperado:** ✓ Reporte con imputaciones realizadas
-
-### 2️⃣ **Generar Dataset para Modelado**
-
-```bash
-# Crear dataset optimizado para ML (usa datos limpios de paso 1)
-curl -X GET "http://localhost:8000/laboratorio/dataset/modelado"
-```
-
-**Resultado esperado:** ✓ CSV sin valores vacíos en `./data/dataset_modelado_YYYYMMDD_HHMMSS.csv`
-
-### 3️⃣ **Entrenar Modelos**
-
-```bash
-# Entrenar XGBoost
-curl -X POST "http://localhost:8000/laboratorio/modelado/entrenar" \
-     -H "Content-Type: application/json" \
-     -d '{"tipo_modelo": "xgboost"}'
-
-# Entrenar Red Neuronal
-curl -X POST "http://localhost:8000/laboratorio/modelado/entrenar" \
-     -H "Content-Type: application/json" \
-     -d '{"tipo_modelo": "neural_network"}'
-```
-
-### 4️⃣ **Realizar Predicciones**
-
-```bash
-# Predecir adherencia de un paciente con XGBoost
-curl -X POST "http://localhost:8000/laboratorio/predecir" \
-     -H "Content-Type: application/json" \
-     -d '{
-  "tipo_modelo": "xgboost",
-  "sexo": "Femenino",
-  "edad": 55,
-  "zona_residencia": "Urbana",
-  "tipo_cancer": "Mama",
-  "estadio": "Ii",
-  "aseguradora": "Sura",
-  "count_consultas": 12,
-  "dias_desde_diagnostico": 365,
-  "count_laboratorios": 8,
-  "avg_resultado_numerico": 2.5,
-  "avg_biopsia": 0.0,
-  "avg_vpH": 0.0,
-  "avg_marcador_ca125": 45.3,
-  "avg_psa": 0.0,
-  "avg_colonoscopia": 0.0
-}'
-```
-
-**Resultado esperado:**
-
-```json
-{
-  "prediction": 1,
-  "probability": 0.6094,
-  "model_version": "xgboost_20251118_000450",
-  "model_name": "xgboost",
-  "inference_time_ms": 5.44
-}
-```
-
-**Nota:** Cambia `"tipo_modelo"` a `"neural_network"` para usar el modelo de red neuronal.
+**Incorporación del CI/CD:**
+**GitHub Actions**: Pipeline completo con linting (ruff), type checking (pyright), tests
+**Build automático**: Docker image generada y publicada en ghcr.io
+**Deploy**: Actualización automática de contenedores en staging/production
+**Versionado semántico**: Tags v1.2.3 para releases estables
 
 ---
 
-## 📚 Documentación Interactiva
+### **Parte 5: Visualización y analítica**
+
+#### **Dashboard ejecutivo de analítica oncológica**
+
+La API incluye endpoints para generar dashboards comprehensivos que permiten visualizar los KPIs clave del programa oncológico:
+
+##### Dashboard principal - Panorama general
+
+![Dashboard Principal](img/Captura%20de%20pantalla%202025-11-18%20a%20las%200.21.07%20(2).png)
+
+*Vista general con métricas principales
+
+##### Dashboard de adherencia y seguimiento
+
+![Dashboard Adherencia](img/Captura%20de%20pantalla%202025-11-18%20a%20las%200.21.17%20(2).png)
+
+*Análisis detallado de adherencia al tratamiento:*
+
+- **Tasa de adherencia** por grupo demográfico (barras agrupadas)
+- **Promedio de resultados** por tipo de laboratorio (líneas)
+- **Alertas de pacientes** sin seguimiento reciente (lista)
+- **Distribución por aseguradora** (barras apiladas)
+
+#### **KPIs para equipo directivo**
+
+**Indicadores estratégicos principales:**
+
+- **Tasa de adherencia global**: Meta >80%, indicador de efectividad del programa
+- **Cobertura de diagnóstico temprano**: % pacientes detectados en estadio I-II
+- **Tiempo diagnóstico-tratamiento**: <30 días promedio
+- **Reducción de costos**: Comparación costos evitados vs invertidos
+
+**Indicadores operativos clave:**
+
+- **Utilización de servicios**: Consultas por especialidad vs capacidad instalada
+- **Tasa de abandono**: Pacientes que dejan el tratamiento antes de 6 meses
+- **Efectividad de laboratorios**: % resultados críticos identificados oportunamente
+- **Satisfacción del paciente**: Encuestas de experiencia (meta por implementar)
+
+#### **Tipos de visualización y justificación**
+
+**Indicadores clave (KPIs Cards):**
+
+- **Métricas principales**: Números grandes y visibles con indicadores de tendencia
+- **Por qué**: Llaman la atención inmediata, facilitan toma de decisiones rápida
+
+**Barras (Bar Charts):**
+
+- **Total pacientes por tipo de cáncer**: Comparación clara entre categorías
+- **Adherencia por grupo**: Facilita identificación de segmentos de alto riesgo
+- **Por qué**: Fácil interpretación, comparación directa, estándar en reportes ejecutivos
+
+**Líneas (Line Charts):**
+
+- **Consultas por mes**: Muestra tendencias temporales y estacionalidad
+- **Promedio resultados laboratorio**: Evolución de indicadores de salud
+- **Por qué**: Excelente para detectar patrones, cambios y tendencias a lo largo del tiempo
+
+**Tablas (Data Tables):**
+
+- **Listado de pacientes críticos**: Detalles específicos con filtros
+- **Resumen de KPIs**: Valores exactos con comparaciones
+- **Por qué**: Precisión numérica, capacidad de drill-down, exportación de datos
+
+**Justificación general:**
+
+- **Simplicidad**: Mantener visualizaciones claras para ejecutivos no técnicos
+- **Accionabilidad**: Cada gráfico responde preguntas específicas de negocio
+- **Consistencia**: Etiquetas claras
+
+---
+
+### **Sistema de analítica para identificar patrones de uso de servicios entre pacientes oncológicos**
+
+El INC requiere un sistema avanzado de analítica para identificar patrones de uso de servicios oncológicos. A continuación se detalla la arquitectura propuesta:
+
+**i. ¿Qué datos usaría?**
+
+Usaría los tres datasets proporcionados:
+
+- **Pacientes.csv**: Para segmentar por características demográficas (edad, tipo_cancer, estadio, aseguradora)
+- **Consultas.csv**: Es el dato clave de "uso". Se analizarían los motivos (Quimioterapia, Radioterapia, Cirugía, etc.)
+- **Laboratorios.csv**: Como un tipo de servicio adicional (Biopsias, Marcadores tumorales, etc.)
+
+**ii. ¿Cómo los limpiaría?**
+
+- **Nulos**: Rellenar zona_residencia y aseguradora (ej. con "Desconocido" o la moda)
+- **Formato**: Convertir todas las columnas de fechas (fecha_dx, fecha_consulta, fecha_muestra) a formato datetime
+- **Coherencia**: Estandarizar valores categóricos (ej. "Pulmón" vs "pulmon", "M" vs "Masculino")
+
+**iii. ¿Cómo estructuraría un modelo o análisis?**
+
+- **Feature Engineering**: Agregar datos a nivel de paciente (id_paciente). Crear variables como total_consultas, n_quimioterapias, n_radioterapias, n_biopsias, tiempo_desde_diagnostico, etc.
+- **Modelo (Clustering)**: Aplicar algoritmo no supervisado como K-Means sobre los datos agregados
+- **Análisis**: El modelo agruparía pacientes en "clústeres". Cada clúster representaría un patrón (ej. "Patrón 1: Alto uso de Quimioterapia y Laboratorios", "Patrón 2: Enfoque Quirúrgico y Control")
+
+**iv. ¿Qué producto final entregaría?**
+
+Un **Dashboard Interactivo** (ej. en Power BI o Tableau) que permita a la dirección:
+
+- Visualizar los patrones de uso encontrados (ej. gráfico de pastel con los clústeres)
+- Filtrar estos patrones por tipo de cáncer, estadio o aseguradora
+- Entender las características de cada patrón (ej. qué servicios consume cada clúster)
+- Generar reportes automáticos de insights operativos
+
+**v. ¿Qué riesgos técnicos anticiparía?**
+
+- **Calidad de Datos**: El principal riesgo. Si los datos de origen (ej. motivo de consulta) se registran mal, el análisis será incorrecto ("Garbage In, Garbage Out")
+- **Privacidad**: Manejo de datos sensibles de pacientes (Habeas Data), requiriendo anonimización y controles de acceso estrictos
+- **Escalabilidad**: El análisis de clustering puede volverse lento y costoso si los datos crecen de miles a millones de registros
+
+---
+
+## Documentación Interactiva
 
 Una vez iniciada la API, accede a:
 
@@ -499,18 +688,11 @@ Una vez iniciada la API, accede a:
 - **ReDoc**: <http://localhost:8000/redoc>
 - **Health Check**: <http://localhost:8000/health>
 
-La documentación interactiva permite:
-
-- 🔍 Explorar todos los endpoints
-- 📝 Ver esquemas de request/response
-- ▶️ Probar endpoints directamente desde el navegador
-- 📖 Leer descripciones detalladas de cada operación
-
 ---
 
-## 🏗️ Arquitectura del Proyecto
+## Arquitectura del Proyecto
 
-```
+```bash
 Test-INC/
 ├── src/
 │   ├── main.py                    # Aplicación principal FastAPI
@@ -571,285 +753,3 @@ Test-INC/
 - **uv**: Gestor de paquetes de Python
 
 ---
-
-## 📈 Modelos de Machine Learning
-
-### XGBoost (HistGradientBoostingClassifier)
-
-- **Algoritmo**: Gradient Boosting optimizado
-- **Ventajas**: Rápido, maneja datos desbalanceados, robusto
-- **Hiperparámetros**:
-  - `max_depth`: 10
-  - `learning_rate`: 0.1
-  - `n_estimators`: 100
-
-### Red Neuronal (TensorFlow)
-
-- **Arquitectura**:
-  - Input layer: 14 features
-  - Hidden layers: [128, 64, 32] neuronas con ReLU
-  - Dropout: 0.3 para regularización
-  - Output layer: 1 neurona con sigmoid
-- **Optimizador**: Adam
-- **Loss**: Binary Crossentropy
-- **Epochs**: 50 con early stopping
-
-### Preprocesamiento
-
-- **Label Encoding** para variables categóricas (`zona_residencia`, `tipo_cancer`)
-- **StandardScaler** para normalización de features numéricas (solo Neural Network)
-- **Imputación automática de NaN** durante entrenamiento (fallback de seguridad)
-- **Corrección de outliers** mediante Winsorización en el endpoint de limpieza
-- **Orden correcto de features** - Se preserva el orden de columnas usado durante entrenamiento
-
-**Nota:** La imputación durante entrenamiento es un fallback. Los datos deberían estar limpios desde el endpoint `/limpieza`.
-
----
-
-## 📊 Métricas de Evaluación
-
-Los modelos se evalúan con:
-
-- **Accuracy**: Precisión general
-- **Precision**: Verdaderos positivos / (VP + FP)
-- **Recall**: Verdaderos positivos / (VP + FN)
-- **F1-Score**: Media armónica de precision y recall
-- **AUC-ROC**: Área bajo la curva ROC
-
----
-
-## 🐳 Docker: Detalles Técnicos
-
-### Servicios
-
-#### PostgreSQL
-
-- **Imagen**: `postgres:17-alpine`
-- **Puerto**: 5432
-- **Volumen persistente**: `postgres_data`
-- **Health check**: `pg_isready`
-
-#### API FastAPI
-
-- **Base**: `python:3.13-slim`
-- **Puerto**: 8000
-- **Volúmenes montados**:
-  - `./models`: Modelos entrenados
-  - `./data`: Datasets CSV
-  - `./logs`: Logs de aplicación
-
-### Flujo de Inicio
-
-```
-1. docker-compose up
-   ↓
-2. PostgreSQL inicia y pasa health check
-   ↓
-3. API espera a PostgreSQL (depends_on: service_healthy)
-   ↓
-4. entrypoint.sh ejecuta:
-   - Espera conexión a PostgreSQL
-   - Corre: alembic upgrade head
-   - Inicia: uvicorn
-   ↓
-5. API lista en http://localhost:8000
-```
-
----
-
-## 🧪 Testing
-
-### Test Manual con curl
-
-Ver ejemplos de curl en cada sección de endpoints arriba.
-
-### Test con Swagger UI
-
-1. Abrir <http://localhost:8000/docs>
-2. Expandir el endpoint deseado
-3. Clic en "Try it out"
-4. Llenar parámetros
-5. Clic en "Execute"
-
-### Test Automatizado
-
-```bash
-# Ejecutar tests (si están disponibles)
-pytest test/
-```
-
----
-
-## 📝 Logging y Monitoreo
-
-### Logs
-
-Los logs se guardan en:
-
-- **Consola**: Nivel INFO
-- **Archivo**: `logs/app.log` con nivel DEBUG
-
-### Monitoreo de Predicciones
-
-Cada predicción se registra automáticamente con:
-
-- Request ID único
-- Versión del modelo
-- Predicción y probabilidad
-- Tiempo de inferencia
-- Features de entrada
-- Estado de éxito/error
-
----
-
-## ⚠️ Troubleshooting
-
-### Error: "No se encontró ningún modelo"
-
-**Solución**: Entrenar un modelo primero usando el endpoint de entrenamiento.
-
-### Error: "Dataset no encontrado"
-
-**Solución**: Generar el dataset primero usando `GET /laboratorio/dataset/modelado`.
-
-### Error de conexión a PostgreSQL
-
-**Solución**:
-
-1. Verificar que Docker Compose está corriendo
-2. Revisar credenciales en `.env`
-3. Verificar logs: `docker-compose logs postgres`
-
-### Puerto 8000 ocupado
-
-**Solución**:
-
-```bash
-# Ver qué proceso usa el puerto
-sudo lsof -i :8000
-# Cambiar puerto en docker-compose.yml o matar el proceso
-```
-
----
-
-## 🔧 Mejoras Técnicas Implementadas
-
-### Manejo Robusto de Valores NaN
-
-El sistema implementa un enfoque de múltiples capas para garantizar datos limpios:
-
-#### 1. **Limpieza en la Fuente** (`/laboratorio/procesamiento/limpieza`)
-
-- Imputa valores NaN directamente en la base de datos
-- Estrategia adaptativa según porcentaje de valores faltantes
-- Columnas numéricas con >20% faltantes: Imputación con 0 (antes se rechazaba)
-- Ejemplo: `resultado_numerico` con 53% faltantes → 228 registros imputados con 0
-
-#### 2. **Generación de Dataset** (`/laboratorio/dataset/modelado`)
-
-- Detección de valores `nan` de tipo float retornados por SQL
-- Conversión automática mediante función `safe_float()` que maneja:
-  - `None` → 0.0
-  - `float('nan')` → 0.0
-  - Valores válidos → preservados
-- Verificación final con `df.fillna(0)` como fallback
-
-#### 3. **Entrenamiento de Modelos**
-
-- Imputación adicional durante entrenamiento (fallback de seguridad)
-- Preservación del orden de features entre entrenamiento y predicción
-- Guardado de `label_encoders` y `feature_names` con cada modelo
-
-#### 4. **Predicciones**
-
-- Codificación correcta de variables categóricas a `*_encoded`
-- Orden garantizado de columnas usando metadata del modelo
-- Manejo de valores desconocidos en encoding (fallback a 0)
-
-### Resultados de las Mejoras
-
-**Antes:**
-
-- Dataset con campos vacíos (`,,`)
-- Warnings de imputación durante entrenamiento
-- Accuracy ~68%
-
-**Después:**
-
-- Dataset 100% sin valores vacíos ✅
-- Sin warnings de NaN ✅
-- Accuracy ~81% ✅ (mejora del 13%)
-- Pipeline completo sin errores ✅
-
-### Acceso a Datos SQL
-
-El sistema usa `text()` de SQLAlchemy para queries complejas. Se implementó:
-
-- Acceso por índice (`row[0]`, `row[1]`) en lugar de atributos
-- Compatible con resultados de tipo tupla
-- Aplicado en endpoints:
-  - `/laboratorio/analisis/dias-lab-diagnostico`
-  - `/laboratorio/dataset/modelado`
-
----
-
-## 👨‍💻 Desarrollo
-
-### Agregar dependencias
-
-```bash
-# Agregar al pyproject.toml y ejecutar:
-uv pip install -r pyproject.toml
-```
-
-### Crear nueva migración
-
-```bash
-# Después de modificar models/tables.py
-alembic revision --autogenerate -m "descripción del cambio"
-alembic upgrade head
-```
-
-### Validación de código
-
-```bash
-# Type checking
-pyright src/
-
-# Linting
-ruff check src/
-```
-
----
-
-## 📄 Licencia
-
-Este proyecto fue desarrollado como prueba técnica para el Laboratorio de Cocreación.
-
----
-
-## 🤝 Contacto
-
-Para dudas sobre la implementación o prueba técnica, contactar al equipo de desarrollo.
-
----
-
-## 🎯 Checklist de Entrega
-
-- ✅ Base de datos PostgreSQL con esquema definido
-- ✅ Endpoints de consulta y agregación de datos
-- ✅ Pipeline de limpieza y procesamiento de datos
-- ✅ Generación de dataset para modelado
-- ✅ Entrenamiento de modelo XGBoost
-- ✅ Entrenamiento de Red Neuronal
-- ✅ Endpoint de predicción con ambos modelos
-- ✅ Documentación interactiva (Swagger)
-- ✅ Docker Compose funcional
-- ✅ Migraciones automáticas con Alembic
-- ✅ Logging y monitoreo de predicciones
-- ✅ Código validado (pyright + ruff)
-- ✅ README completo con ejemplos
-
----
-
-**¡API lista para demostración! 🚀**
